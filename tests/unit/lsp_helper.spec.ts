@@ -1,4 +1,4 @@
-import { strictEqual } from "assert";
+import { deepStrictEqual, strictEqual } from "assert";
 import { runExecutable } from "../../client/tools/lsp_helper";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -10,6 +10,57 @@ suite("runExecutable", () => {
   teardown(() => {
     Object.defineProperty(process, "platform", { value: originalPlatform });
     process.env = originalEnv;
+  });
+
+  for (const command of ["lint", "fmt"] as const) {
+    test(`runs vp ${command} --lsp in the project directory`, async () => {
+      const result = await runExecutable({
+        path: "/project/node_modules/.bin/vp",
+        loader: "native",
+        vitePlus: command,
+        cwd: "/project",
+      });
+      deepStrictEqual(result.args, [command, "--lsp"]);
+      strictEqual(result.options?.cwd, "/project");
+    });
+
+    test(`runs the vp JavaScript entry point with ${command} --lsp and the configured runtime`, async () => {
+      const result = await runExecutable(
+        {
+          path: "/project/node_modules/vite-plus/bin/vp",
+          loader: "node",
+          vitePlus: command,
+          cwd: "/project",
+        },
+        true,
+      );
+      strictEqual(result.command, process.execPath);
+      deepStrictEqual(result.args, ["/project/node_modules/vite-plus/bin/vp", command, "--lsp"]);
+      strictEqual(result.options?.cwd, "/project");
+      strictEqual(result.options?.env?.ELECTRON_RUN_AS_NODE, "1");
+    });
+  }
+
+  test("does not interpret a vp shell shim as JavaScript with useExecPath", async () => {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    const result = await runExecutable(
+      { path: "/project/node_modules/.bin/vp", loader: "native", vitePlus: "lint" },
+      true,
+    );
+    strictEqual(result.command, "/project/node_modules/.bin/vp");
+    deepStrictEqual(result.args, ["lint", "--lsp"]);
+  });
+
+  test("quotes Windows vp.cmd paths and passes the subcommand through the shell", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const result = await runExecutable({
+      path: "C:\\My Project\\node_modules\\.bin\\vp.cmd",
+      loader: "native",
+      vitePlus: "fmt",
+    });
+    strictEqual(result.command, '"C:\\My Project\\node_modules\\.bin\\vp.cmd"');
+    strictEqual(result.options?.shell, true);
+    deepStrictEqual(result.args, ["fmt", "--lsp"]);
   });
 
   test("should create Node.js executable for .js files", async () => {

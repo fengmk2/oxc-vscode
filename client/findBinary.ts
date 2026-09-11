@@ -11,6 +11,8 @@ export type BinarySearchResult = {
   path: string;
   loader: "node" | "native";
   yarnPnpLoaderPath?: string; // only set if loader is 'node' and found via Yarn PnP
+  vitePlus?: "lint" | "fmt";
+  cwd?: string;
 };
 
 /** @internal only used for testing */
@@ -44,7 +46,11 @@ async function searchNodeModulesDefaultBinPath(
 ): Promise<BinarySearchResult | undefined> {
   const candidates = folders.flatMap((folder) => {
     const basePath = path.join(folder, ".bin", binaryName);
-    return process.platform === "win32" ? [basePath, `${basePath}.exe`] : [basePath];
+    return process.platform === "win32"
+      ? binaryName === "vp"
+        ? [`${basePath}.cmd`, `${basePath}.exe`, basePath]
+        : [basePath, `${basePath}.exe`]
+      : [basePath];
   });
 
   const exists = await Promise.all(
@@ -202,6 +208,7 @@ export async function searchYarnPnpBin(
  */
 export async function searchGlobalNodeModulesBin(
   binaryName: string,
+  packageName = binaryName,
 ): Promise<BinarySearchResult | undefined> {
   const globalPaths = await globalNodeModulesPaths();
 
@@ -212,6 +219,23 @@ export async function searchGlobalNodeModulesBin(
   const result = await searchNodeModulesDefaultBinPath(binaryName, globalPaths);
   if (result) {
     return result;
+  }
+  // A package's executable can have a different name (vite-plus provides vp).
+  // Read only the global package directories, without resolving into a parent.
+  if (packageName !== binaryName) {
+    for (const globalPath of globalPaths) {
+      try {
+        const packageDir = path.join(globalPath, packageName);
+        const pkg = JSON.parse(readFileSync(path.join(packageDir, "package.json"), "utf8"));
+        const binEntry = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[binaryName];
+        if (pkg.name !== packageName || typeof binEntry !== "string") continue;
+        const binPath = path.resolve(packageDir, binEntry);
+        // oxlint-disable-next-line no-await-in-loop -- preserve global lookup priority
+        await workspace.fs.stat(Uri.file(binPath));
+        return { path: binPath, loader: "node" };
+      } catch {}
+    }
+    return undefined;
   }
   // fallback to direct binary lookup via require.resolve
   try {
@@ -244,7 +268,11 @@ export async function searchEnvPath(
       return [];
     }
     const basePath = path.join(folder, defaultBinaryName);
-    return process.platform === "win32" ? [basePath, `${basePath}.exe`] : [basePath];
+    return process.platform === "win32"
+      ? defaultBinaryName === "vp"
+        ? [`${basePath}.cmd`, `${basePath}.exe`, basePath]
+        : [basePath, `${basePath}.exe`]
+      : [basePath];
   });
 
   const binary = await Promise.all(
@@ -270,6 +298,7 @@ export async function searchEnvPath(
 export async function searchSettingsBin(
   defaultBinaryName: string,
   settingsBinary: string,
+  cwd = workspace.workspaceFolders?.[0]?.uri.fsPath,
 ): Promise<BinarySearchResult | undefined> {
   if (!workspace.isTrusted) {
     return;
@@ -281,7 +310,6 @@ export async function searchSettingsBin(
   }
 
   if (!path.isAbsolute(settingsBinary)) {
-    const cwd = workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!cwd) {
       return undefined;
     }
@@ -298,7 +326,22 @@ export async function searchSettingsBin(
     settingsBinary.endsWith(".js") ||
     settingsBinary.endsWith(".cjs") ||
     settingsBinary.endsWith(".mjs") ||
-    settingsBinary.endsWith(`${defaultBinaryName}${path.sep}bin${path.sep}${defaultBinaryName}`);
+    settingsBinary.endsWith(`${defaultBinaryName}${path.sep}bin${path.sep}${defaultBinaryName}`) ||
+    (defaultBinaryName === "vp" && settingsBinary.endsWith(path.join("vite-plus", "bin", "vp")));
+
+  // npm creates both a POSIX shim and a .cmd shim on Windows. Prefer the
+  // latter when the configured vp path omits the extension.
+  if (
+    process.platform === "win32" &&
+    defaultBinaryName === "vp" &&
+    !isNode &&
+    !path.extname(settingsBinary)
+  ) {
+    try {
+      await workspace.fs.stat(Uri.file(`${settingsBinary}.cmd`));
+      return { path: `${settingsBinary}.cmd`, loader: "native" };
+    } catch {}
+  }
 
   try {
     await workspace.fs.stat(Uri.file(settingsBinary));

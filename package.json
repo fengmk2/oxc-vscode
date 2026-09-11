@@ -326,6 +326,20 @@
           "scope": "window",
           "markdownDescription": "Path to an Oxc formatter binary. Default: auto detection in `node_modules`."
         },
+        "oxc.vitePlus.enable": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "scope": "resource",
+          "default": null,
+          "markdownDescription": "Use `vp lint --lsp` and `vp fmt --lsp`. Set to `true` to select Vite+ without detecting a dependency, `false` to disable Vite+ integration, or `null` to detect a direct `vite-plus` dependency. Explicit `oxc.path.oxlint` and `oxc.path.oxfmt` settings take priority."
+        },
+        "oxc.path.vp": {
+          "type": "string",
+          "scope": "resource",
+          "markdownDescription": "Path to a `vp` executable. Relative paths use the workspace folder. Setting this path selects Vite+ without automatic detection, unless `oxc.vitePlus.enable` is `false`. Explicit `oxc.path.oxlint` and `oxc.path.oxfmt` settings take priority."
+        },
         "oxc.path.tsgolint": {
           "type": "string",
           "scope": "window",
@@ -410,6 +424,8 @@
         "oxc.path.oxfmt",
         "oxc.path.tsgolint",
         "oxc.path.node",
+        "oxc.path.vp",
+        "oxc.vitePlus.enable",
         "oxc.useExecPath"
       ]
     }

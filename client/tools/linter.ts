@@ -1,4 +1,6 @@
 import { promises as fsPromises } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
+import { VitePlusError } from "../detectVitePlus";
 
 import {
   CodeActionKind,
@@ -144,6 +146,9 @@ export default class LinterTool implements ToolInterface {
 
   // LSP client instance
   private client: LanguageClient | undefined;
+  private binary: BinarySearchResult | undefined;
+  private binaryError: string | undefined;
+  private restartQueue: Promise<void> = Promise.resolve();
 
   private disposeResources: (() => Promise<void>) | undefined;
 
@@ -205,11 +210,19 @@ export default class LinterTool implements ToolInterface {
   }
 
   async getBinary(): Promise<BinarySearchResult | undefined> {
+    this.binaryError = undefined;
     if (process.env.SERVER_PATH_DEV_OXLINT) {
       const path = process.env.SERVER_PATH_DEV_OXLINT;
       return { path, loader: path.endsWith(".js") ? "node" : "native" };
     }
-    const bin = await this.configService.getOxlintServerBinPath();
+    let bin: BinarySearchResult | undefined;
+    try {
+      bin = await this.configService.getOxlintServerBinPath();
+    } catch (error) {
+      if (!(error instanceof VitePlusError)) throw error;
+      this.binaryError = error.message;
+      return undefined;
+    }
     if (bin) {
       try {
         await fsPromises.access(bin.path);
@@ -221,16 +234,19 @@ export default class LinterTool implements ToolInterface {
   }
 
   async activate(binary?: BinarySearchResult): Promise<void> {
+    this.binary = binary;
     if (!binary) {
-      this.statusBarItemHandler.updateTool("linter", false, "No valid oxlint binary found.");
-      this.outputChannel.appendLine("No valid oxlint binary found. Linter will not be activated.");
+      const message = this.binaryError ?? "No valid oxlint binary found.";
+      this.statusBarItemHandler.updateTool("linter", false, message);
+      this.outputChannel.warn(message);
       return Promise.resolve();
     }
 
-    this.allowedToStartServer = this.configService.vsCodeConfig.requireConfig
-      ? (await workspace.findFiles(oxlintConfigDefaultFilePattern, "**/node_modules/**", 1))
-          .length > 0
-      : true;
+    this.allowedToStartServer =
+      !binary.vitePlus && this.configService.vsCodeConfig.requireConfig
+        ? (await workspace.findFiles(oxlintConfigDefaultFilePattern, "**/node_modules/**", 1))
+            .length > 0
+        : true;
 
     const run: Executable = await runExecutable(
       binary,
@@ -356,7 +372,7 @@ export default class LinterTool implements ToolInterface {
     let activatorDispatcher: { dispose: () => void } | undefined;
     if (this.allowedToStartServer) {
       if (this.configService.vsCodeConfig.enableOxlint) {
-        await this.client.start();
+        await this.startClient();
       }
     } else {
       activatorDispatcher = this.generateActivatorByConfig(this.configService.vsCodeConfig);
@@ -377,6 +393,11 @@ export default class LinterTool implements ToolInterface {
   }
 
   async deactivate(): Promise<void> {
+    await this.restartQueue;
+    await this.stopClient();
+  }
+
+  private async stopClient(): Promise<void> {
     try {
       await this.client?.stop();
     } catch {
@@ -404,18 +425,46 @@ export default class LinterTool implements ToolInterface {
       }
     } else {
       if (configService.vsCodeConfig.enableOxlint) {
-        await this.client.start();
+        await this.startClient();
       }
     }
   }
 
-  async restart(): Promise<void> {
-    await this.deactivate();
-    const newBinaryPath = await this.getBinary();
-    await this.activate(newBinaryPath);
+  restart(onlyIfBinaryChanged = false): Promise<void> {
+    const restart = this.restartQueue.then(async () => {
+      const previousError = this.binaryError;
+      const newBinary = await this.getBinary();
+      if (
+        onlyIfBinaryChanged &&
+        isDeepStrictEqual(this.binary, newBinary) &&
+        previousError === this.binaryError
+      )
+        return;
+      await this.stopClient();
+      await this.activate(newBinary);
+    });
+    this.restartQueue = restart.catch(() => {});
+    return restart;
   }
 
-  async onConfigChange(event: ConfigurationChangeEvent): Promise<void> {
+  private async startClient(): Promise<void> {
+    try {
+      await this.client?.start();
+      this.binaryError = undefined;
+    } catch (error) {
+      if (!this.binary?.vitePlus) throw error;
+      this.binaryError = `Failed to start Vite+ ${this.binary.vitePlus} --lsp. Install or upgrade vite-plus in ${this.binary.cwd}, then restart the Oxc servers. ${error instanceof Error ? error.message : String(error)}`;
+      this.outputChannel.error(this.binaryError);
+    }
+  }
+
+  onConfigChange(event: ConfigurationChangeEvent): Promise<void> {
+    const change = this.restartQueue.then(() => this.applyConfigChange(event));
+    this.restartQueue = change.catch(() => {});
+    return change;
+  }
+
+  private async applyConfigChange(event: ConfigurationChangeEvent): Promise<void> {
     if (
       event.affectsConfiguration(`${ConfigService.namespace}.enable`) ||
       event.affectsConfiguration(`${ConfigService.namespace}.enable.oxlint`)
@@ -449,6 +498,7 @@ export default class LinterTool implements ToolInterface {
     isEnabled: boolean;
     tooltipText?: string;
   } {
+    if (this.binaryError) return { isEnabled: false, tooltipText: this.binaryError };
     if (!this.allowedToStartServer) {
       return {
         isEnabled: false,
@@ -502,7 +552,7 @@ export default class LinterTool implements ToolInterface {
       this.allowedToStartServer = true;
       this.updateStatusBar(config.enableOxlint);
       if (this.client && !this.client.isRunning() && config.enableOxlint) {
-        await this.client.start();
+        await this.startClient();
       }
     });
 

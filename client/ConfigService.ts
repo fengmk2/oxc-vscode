@@ -1,4 +1,6 @@
-import { ConfigurationChangeEvent, Uri, workspace, WorkspaceFolder } from "vscode";
+import * as path from "node:path";
+import { ConfigurationChangeEvent, Uri, window, workspace, WorkspaceFolder } from "vscode";
+import { detectVitePlusProject, VitePlusError } from "./detectVitePlus";
 import { DiagnosticPullMode } from "vscode-languageclient";
 import {
   BinarySearchResult,
@@ -23,6 +25,7 @@ export class ConfigService implements IDisposable {
   public vsCodeConfig: VSCodeConfig;
 
   private workspaceConfigs: Map<string, WorkspaceConfig> = new Map();
+  private vitePlusSearch: Promise<BinarySearchResult | null> | undefined;
 
   public onConfigChange:
     | ((this: ConfigService, config: ConfigurationChangeEvent) => Promise<void>)
@@ -116,10 +119,15 @@ export class ConfigService implements IDisposable {
 
   private async searchBinaryPath(
     settingsBinary: string | undefined,
-    defaultBinaryName: string,
+    defaultBinaryName: "oxlint" | "oxfmt",
   ): Promise<BinarySearchResult | undefined> {
     if (settingsBinary) {
       return searchSettingsBin(defaultBinaryName, settingsBinary);
+    }
+
+    const vitePlus = await this.searchVitePlus();
+    if (vitePlus) {
+      return { ...vitePlus, vitePlus: defaultBinaryName === "oxlint" ? "lint" : "fmt" };
     }
 
     return (
@@ -128,6 +136,60 @@ export class ConfigService implements IDisposable {
       (await searchGlobalNodeModulesBin(defaultBinaryName)) ??
       (await searchEnvPath(defaultBinaryName))
     );
+  }
+
+  private async searchVitePlus(): Promise<BinarySearchResult | null> {
+    // Lint and fmt share concurrent discovery, but restarts always re-read disk.
+    if (this.vitePlusSearch) return this.vitePlusSearch;
+    const search = this.resolveVitePlus();
+    this.vitePlusSearch = search;
+    try {
+      return await search;
+    } finally {
+      this.vitePlusSearch = undefined;
+    }
+  }
+
+  private async resolveVitePlus(): Promise<BinarySearchResult | null> {
+    if (!workspace.isTrusted) return null;
+
+    const documentUri = window.activeTextEditor?.document.uri;
+    const activeFolder =
+      documentUri?.scheme === "file" ? workspace.getWorkspaceFolder(documentUri) : undefined;
+    const folders = activeFolder ? [activeFolder] : (workspace.workspaceFolders ?? []);
+
+    for (const folder of folders) {
+      const config = workspace.getConfiguration(ConfigService.namespace, folder.uri);
+      const enabled = config.get<boolean | null>("vitePlus.enable");
+      if (enabled === false) continue;
+
+      const configuredPath = config.get<string>("path.vp");
+      const start =
+        activeFolder && documentUri ? path.dirname(documentUri.fsPath) : folder.uri.fsPath;
+      if (configuredPath) {
+        // An explicit vp path opts in without requiring a dependency declaration.
+        // oxlint-disable-next-line no-await-in-loop -- workspace folder order is significant
+        const binary = await searchSettingsBin("vp", configuredPath, folder.uri.fsPath);
+        if (!binary)
+          throw new VitePlusError(`Invalid Vite+ binary: ${configuredPath}. Check oxc.path.vp.`);
+        return { ...binary, cwd: folder.uri.fsPath };
+      }
+
+      const project = detectVitePlusProject(start, enabled === true);
+      if (!project) continue;
+      // Global vp is eligible only after detection or explicit opt-in.
+      const binary: BinarySearchResult | undefined = project.vpPath
+        ? { path: project.vpPath, loader: "native" }
+        : // oxlint-disable-next-line no-await-in-loop -- global lookup requires a Vite+ project
+          ((await searchEnvPath("vp")) ?? (await searchGlobalNodeModulesBin("vp", "vite-plus")));
+      if (!binary) {
+        throw new VitePlusError(
+          `Vite+ selected in ${project.root}, but no vp binary was found. Run your package manager's install command (for example, pnpm install), or set oxc.path.vp, then restart the Oxc servers.`,
+        );
+      }
+      return { ...binary, cwd: project.root };
+    }
+    return null;
   }
 
   private async onVscodeConfigChange(event: ConfigurationChangeEvent): Promise<void> {

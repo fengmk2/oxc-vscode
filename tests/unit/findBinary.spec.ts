@@ -10,11 +10,29 @@ import {
   searchEnvPath,
   searchProjectNodeModulesBin,
   searchYarnPnpBin,
+  searchSettingsBin,
 } from "../../client/findBinary";
 import { WORKSPACE_FOLDER } from "../test-helpers.js";
 
 suite("findBinary", () => {
   const binaryName = "oxlint";
+
+  test("prefers a Windows vp.cmd shim over the POSIX shim for a configured path", async () => {
+    const originalPlatform = process.platform;
+    const dir = mkdtempSync(path.join(tmpdir(), "test-vp-cmd-"));
+    const vpPath = path.join(dir, "vp");
+    writeFileSync(vpPath, "");
+    writeFileSync(`${vpPath}.cmd`, "");
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      const result = await searchSettingsBin("vp", vpPath);
+      strictEqual(result?.path, `${vpPath}.cmd`);
+      strictEqual(result?.loader, "native");
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform });
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   suite("replaceTargetFromMainToBin", () => {
     let tmpDir: string;

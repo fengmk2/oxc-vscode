@@ -18,6 +18,8 @@ suite("VSCodeConfig", () => {
     "path.node",
     "useExecPath",
     "suppressProgramErrors",
+    "path.vp",
+    "vitePlus.enable",
   ];
   setup(async () => {
     await Promise.all(keys.map((key) => conf.update(key, undefined)));
@@ -109,6 +111,8 @@ suite("VSCodeConfig", () => {
       { key: "path.tsgolint", affects: true },
       { key: "path.node", affects: true },
       { key: "useExecPath", affects: true },
+      { key: "path.vp", affects: true },
+      { key: "vitePlus.enable", affects: true },
       { key: "requireConfig", affects: false },
       { key: "path.oxfmt", affects: false },
     ];
@@ -136,6 +140,8 @@ suite("VSCodeConfig", () => {
       { key: "path.oxfmt", affects: true },
       { key: "path.node", affects: true },
       { key: "useExecPath", affects: true },
+      { key: "path.vp", affects: true },
+      { key: "vitePlus.enable", affects: true },
       { key: "path.tsgolint", affects: false },
       { key: "requireConfig", affects: false },
       { key: "path.oxlint", affects: false },

@@ -154,6 +154,8 @@ export class VSCodeConfig implements VSCodeConfigInterface {
   private effectsGeneralLSPConnection(event: ConfigurationChangeEvent): boolean {
     return (
       event.affectsConfiguration(`${ConfigService.namespace}.path.node`) ||
+      event.affectsConfiguration(`${ConfigService.namespace}.path.vp`) ||
+      event.affectsConfiguration(`${ConfigService.namespace}.vitePlus.enable`) ||
       event.affectsConfiguration(`${ConfigService.namespace}.useExecPath`)
     );
   }

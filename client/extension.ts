@@ -118,6 +118,26 @@ export async function activate(context: ExtensionContext) {
     }),
   );
 
+  // A window has one client per tool. Re-resolve on navigation, and restart
+  // only when the executable, Vite+ command, or project directory changes.
+  context.subscriptions.push(
+    window.onDidChangeActiveTextEditor((editor) => {
+      if (
+        editor?.document.uri.scheme !== "file" ||
+        !workspace.getWorkspaceFolder(editor.document.uri)
+      )
+        return;
+      for (const tool of tools) {
+        void tool.restart(true).catch((error) => {
+          const output = tool instanceof Linter ? outputChannelLint : outputChannelFormat;
+          output.error(
+            `Failed to switch language server: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      }
+    }),
+  );
+
   // Finally show the status bar item.
   statusBarItemHandler.show();
 }
