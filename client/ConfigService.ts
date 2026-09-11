@@ -1,6 +1,7 @@
 import * as path from "node:path";
 import { ConfigurationChangeEvent, Uri, window, workspace, WorkspaceFolder } from "vscode";
 import { detectVitePlusProject, VitePlusError } from "./detectVitePlus";
+import { getShellEnv } from "./getShellEnv";
 import { DiagnosticPullMode } from "vscode-languageclient";
 import {
   BinarySearchResult,
@@ -175,13 +176,15 @@ export class ConfigService implements IDisposable {
         return { ...binary, cwd: folder.uri.fsPath };
       }
 
-      const project = detectVitePlusProject(start, enabled === true);
+      const project = detectVitePlusProject(start, enabled === true, folder.uri.fsPath);
       if (!project) continue;
       // Global vp is eligible only after detection or explicit opt-in.
+      // oxlint-disable no-await-in-loop -- global lookup requires a Vite+ project
       const binary: BinarySearchResult | undefined = project.vpPath
         ? { path: project.vpPath, loader: "native" }
-        : // oxlint-disable-next-line no-await-in-loop -- global lookup requires a Vite+ project
-          ((await searchEnvPath("vp")) ?? (await searchGlobalNodeModulesBin("vp", "vite-plus")));
+        : ((await searchEnvPath("vp", await getShellEnv())) ??
+          (await searchGlobalNodeModulesBin("vp", "vite-plus")));
+      // oxlint-enable no-await-in-loop
       if (!binary) {
         throw new VitePlusError(
           `Vite+ selected in ${project.root}, but no vp binary was found. Run your package manager's install command (for example, pnpm install), or set oxc.path.vp, then restart the Oxc servers.`,

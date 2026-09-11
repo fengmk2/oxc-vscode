@@ -4,7 +4,13 @@ import * as path from "node:path";
 import { mock } from "node:test";
 import { commands, ConfigurationTarget, Uri, window, workspace } from "vscode";
 import { ConfigService } from "../../client/ConfigService";
+import { runExecutable } from "../../client/tools/lsp_helper";
 import { WORKSPACE_FOLDER, WORKSPACE_SECOND_FOLDER } from "../test-helpers";
+
+// Mock the shared CommonJS exports used by the compiled test modules.
+const shellEnv: typeof import("../../client/getShellEnv") = require(
+  path.join(__dirname, "../client/getShellEnv.js"),
+);
 
 suite("Vite+ server selection", () => {
   const root = path.join(WORKSPACE_FOLDER.uri.fsPath, "vite-plus-tests");
@@ -38,6 +44,7 @@ suite("Vite+ server selection", () => {
   }
 
   setup(async () => {
+    mock.method(shellEnv, "getShellEnv", async () => ({ PATH: process.env.PATH }));
     file("pnpm-workspace.yaml");
     await open();
     service = new ConfigService();
@@ -81,6 +88,18 @@ suite("Vite+ server selection", () => {
     await conf.update("vitePlus.enable", true, ConfigurationTarget.WorkspaceFolder);
     strictEqual((await service.getOxlintServerBinPath())?.path, vpPath);
     strictEqual((await service.getOxfmtServerBinPath())?.vitePlus, "fmt");
+  });
+
+  test("explicit enable keeps the same executable and cwd across source directories", async () => {
+    file("package.json", "{}");
+    const vpPath = shim();
+    await conf.update("vitePlus.enable", true, ConfigurationTarget.WorkspaceFolder);
+    await open(path.join(root, "src/pages"));
+    const first = await service.getOxlintServerBinPath();
+    await open(path.join(root, "src/components"));
+    deepStrictEqual(await service.getOxlintServerBinPath(), first);
+    deepStrictEqual(first, { path: vpPath, loader: "native", cwd: root, vitePlus: "lint" });
+    strictEqual((await service.getOxfmtServerBinPath())?.cwd, root);
   });
 
   test("an explicit vp path opts in and resolves against the workspace folder", async () => {
@@ -172,6 +191,22 @@ suite("Vite+ server selection", () => {
       (await service.getOxlintServerBinPath())?.vitePlus,
       "lint",
       "explicit opt-in permits global resolution without a dependency",
+    );
+  });
+
+  test("discovers global vp using the same shell PATH as the launcher", async () => {
+    declare();
+    const shellBin = path.join(root, "shell-bin");
+    const vpPath = file(process.platform === "win32" ? "vp.cmd" : "vp", "", shellBin);
+    process.env.PATH = path.join(root, "inherited-bin");
+    mock.method(shellEnv, "getShellEnv", async () => ({ PATH: shellBin }));
+    const binary = await service.getOxlintServerBinPath();
+    strictEqual(binary?.path, vpPath);
+    strictEqual((await runExecutable(binary!)).options?.env?.PATH, shellBin);
+    strictEqual(
+      process.env.PATH,
+      path.join(root, "inherited-bin"),
+      "shell discovery must not mutate the extension host environment",
     );
   });
 

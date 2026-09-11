@@ -15,7 +15,7 @@ See the official [Oxlint editor setup](https://oxc.rs/docs/guide/usage/linter/ed
 
 ## Vite+
 
-For projects that declare `vite-plus` in `dependencies` or `devDependencies`, the extension runs `vp lint --lsp` and `vp fmt --lsp`. Detection starts from the active file's directory and stops at the monorepo root (`pnpm-workspace.yaml`, `package.json` with `workspaces`, or `lerna.json`). With no active workspace file, the extension checks the workspace folders in order. It checks the local `node_modules/.bin/vp` shim first, then `PATH` and global package installations.
+For projects that declare `vite-plus` in `dependencies` or `devDependencies`, the extension runs `vp lint --lsp` and `vp fmt --lsp`. Detection starts from the active file's directory and stops at the monorepo root (`pnpm-workspace.yaml`, `package.json` with `workspaces`, or `lerna.json`). With no active workspace file, the extension checks the workspace folders in order. It checks the local `node_modules/.bin/vp` shim first, then the shell's `PATH` and global package installations.
 
 To select Vite+ without automatic dependency detection, add this to your workspace's `.vscode/settings.json`:
 
@@ -33,9 +33,11 @@ You can also set `oxc.path.vp` to an absolute path or a path relative to the wor
 }
 ```
 
-On Windows, use `./node_modules/.bin/vp.cmd`. To run the JavaScript entry point with `oxc.path.node` or `oxc.useExecPath`, set `oxc.path.vp` to `./node_modules/vite-plus/bin/vp`.
+On Windows, use `./node_modules/.bin/vp.cmd`. With `oxc.useExecPath`, the extension runs npm and pnpm project entries and their Node subprocesses with VS Code's bundled Node. You can also set `oxc.path.vp` to `./node_modules/vite-plus/bin/vp` to select the JavaScript entry directly.
 
 Both settings can differ between workspace folders. `oxc.vitePlus.enable` defaults to `null` (automatic detection); `false` disables Vite+ integration, including `oxc.path.vp`. Explicit `oxc.path.oxlint` and `oxc.path.oxfmt` settings take priority for their respective tools.
+
+Forced mode uses the nearest `package.json` or monorepo root as its working directory, with the workspace folder as a fallback. Switching between source directories in the same package does not restart the servers.
 
 The extension rechecks Vite+ when you switch files and restarts a server if its executable or project directory changes. It uses one server per tool for the window. If Vite+ is selected but `vp` is unavailable, the status item and output channels show an install hint. Install your dependencies and run the **Oxc: Restart oxlint Server** and **Oxc: Restart oxfmt Server** commands. A failed Vite+ launch shows an install or upgrade hint. Vite+ integration requires a trusted workspace, and `oxc.requireConfig` does not require a separate Oxlint configuration when Vite+ is selected.
 

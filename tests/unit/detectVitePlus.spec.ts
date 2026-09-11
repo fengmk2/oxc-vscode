@@ -129,6 +129,28 @@ suite("detectVitePlusProject", () => {
     deepStrictEqual(detectVitePlusProject(root, true), { root, vpPath });
   });
 
+  for (const marker of ["package", "workspace", "none"]) {
+    test(`forced mode has a stable project root with ${marker} metadata`, () => {
+      if (marker !== "workspace") rmSync(path.join(root, "pnpm-workspace.yaml"));
+      if (marker === "package") pkg("", {});
+      const vpPath = shim();
+      const firstFile = file("src/pages/index.ts");
+      const secondFile = file("src/components/button.ts");
+      deepStrictEqual(detectVitePlusProject(firstFile, true, root), { root, vpPath });
+      deepStrictEqual(detectVitePlusProject(secondFile, true, root), { root, vpPath });
+    });
+  }
+
+  test("forced mode retains a nested package root and a hoisted install", () => {
+    pkg("packages/app", {});
+    const vpPath = shim();
+    const start = file("packages/app/src/index.ts");
+    deepStrictEqual(detectVitePlusProject(start, true, root), {
+      root: path.join(root, "packages/app"),
+      vpPath,
+    });
+  });
+
   test("prefers the nearest declaring package and its install", () => {
     pkg();
     shim();

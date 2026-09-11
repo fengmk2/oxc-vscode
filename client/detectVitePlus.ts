@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import * as path from "node:path";
 
 export interface VitePlusProject {
-  /** The ancestor that declares vite-plus, or the explicitly enabled directory. */
+  /** The declaring ancestor, or the nearest package/workspace root in forced mode. */
   root: string;
   /** Undefined means Vite+ is selected but is not installed locally. */
   vpPath?: string;
@@ -36,7 +36,11 @@ function isRootWorkspace(dir: string, pkg: PackageJson | null): boolean {
  * Global lookup belongs to the caller and must only run for a non-null result.
  * https://github.com/voidzero-dev/vite-plus/pull/1614
  */
-export function detectVitePlusProject(start: string, enabled = false): VitePlusProject | null {
+export function detectVitePlusProject(
+  start: string,
+  enabled = false,
+  workspaceFolder?: string,
+): VitePlusProject | null {
   let dir = path.resolve(start);
   try {
     if (statSync(dir).isFile()) dir = path.dirname(dir);
@@ -45,7 +49,21 @@ export function detectVitePlusProject(start: string, enabled = false): VitePlusP
   }
 
   let pkg = readPackageJson(dir);
-  if (!enabled) {
+  if (enabled) {
+    // Explicit opt-in skips dependency detection, but still needs a stable cwd
+    // when the active document moves between source directories.
+    const fallbackRoot = workspaceFolder ? path.resolve(workspaceFolder) : dir;
+    while (!pkg && !isRootWorkspace(dir, pkg)) {
+      const parent = path.dirname(dir);
+      if ((workspaceFolder && dir === fallbackRoot) || parent === dir) {
+        dir = fallbackRoot;
+        pkg = readPackageJson(dir);
+        break;
+      }
+      dir = parent;
+      pkg = readPackageJson(dir);
+    }
+  } else {
     while (!pkg?.dependencies?.["vite-plus"] && !pkg?.devDependencies?.["vite-plus"]) {
       if (isRootWorkspace(dir, pkg) || dir === path.dirname(dir)) return null;
       dir = path.dirname(dir);

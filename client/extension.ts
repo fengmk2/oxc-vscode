@@ -6,6 +6,7 @@ import StatusBarItemHandler from "./StatusBarItemHandler";
 import Formatter from "./tools/formatter";
 import Linter from "./tools/linter";
 import ToolInterface from "./tools/ToolInterface";
+import { disposeBundledNode } from "./bundledNode";
 
 const outputChannelName = "Oxc";
 const tools: ToolInterface[] = [];
@@ -145,4 +146,5 @@ export async function activate(context: ExtensionContext) {
 export async function deactivate(): Promise<void> {
   await Promise.all(tools.map((tool) => tool.deactivate()));
   tools.length = 0;
+  disposeBundledNode();
 }

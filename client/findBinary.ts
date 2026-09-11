@@ -253,8 +253,9 @@ export async function searchGlobalNodeModulesBin(
  */
 export async function searchEnvPath(
   defaultBinaryName: string,
+  environment: Record<string, string | undefined> = env,
 ): Promise<BinarySearchResult | undefined> {
-  const envPath = env.PATH;
+  const envPath = environment.PATH;
 
   if (!envPath) {
     return undefined;

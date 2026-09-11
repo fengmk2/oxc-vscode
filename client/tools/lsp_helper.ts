@@ -4,6 +4,8 @@ import { LogOutputChannel, window } from "vscode";
 import { Executable, MessageType, ShowMessageParams } from "vscode-languageclient/node";
 import type { BinarySearchResult } from "../findBinary";
 import { getShellEnv } from "../getShellEnv";
+import { resolveVitePlusNodeEntry } from "../resolveVitePlusNodeEntry";
+import { bundledNodeDirectory } from "../bundledNode";
 
 export async function runExecutable(
   binary: BinarySearchResult,
@@ -12,6 +14,10 @@ export async function runExecutable(
   tsgolintPath?: string,
   suppressProgramErrors?: boolean,
 ): Promise<Executable> {
+  if (binary.vitePlus && useExecPath && binary.loader === "native") {
+    const nodeEntry = resolveVitePlusNodeEntry(binary.path);
+    if (nodeEntry) binary = { ...binary, path: nodeEntry, loader: "node" };
+  }
   const shellEnv = await getShellEnv();
 
   const serverEnv: Record<string, string> = {
@@ -42,7 +48,10 @@ export async function runExecutable(
   }
 
   if (path.isAbsolute(nodeCommand)) {
-    const nodeDir = path.dirname(nodeCommand);
+    // vp also starts Node by name internally. Electron's executable is usually
+    // named Code/Code Helper, so its directory alone does not provide `node`.
+    const nodeDir =
+      binary.vitePlus && useExecPath ? bundledNodeDirectory() : path.dirname(nodeCommand);
     serverEnv.PATH = `${nodeDir}${path.delimiter}${serverEnv.PATH ?? ""}`;
   }
 
