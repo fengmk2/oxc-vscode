@@ -4,7 +4,6 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { mock } from "node:test";
 import { runExecutable } from "../../client/tools/lsp_helper";
-import { disposeBundledNode } from "../../client/bundledNode";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -26,7 +25,6 @@ suite("runExecutable", () => {
 
   teardown(() => {
     mock.restoreAll();
-    disposeBundledNode();
     rmSync(tempDir, { recursive: true, force: true });
     Object.defineProperty(process, "platform", { value: originalPlatform });
     process.env = originalEnv;
@@ -82,9 +80,8 @@ suite("runExecutable", () => {
 const { spawnSync } = require("node:child_process");
 const args = process.argv.slice(2);
 const script = require("node:path").join(__dirname, "child.cjs");
-const child = spawnSync("node", [process.platform === "win32" ? '"' + script + '"' : script, ...args], {
+const child = spawnSync(process.execPath, [script, ...args], {
   encoding: "utf8",
-  shell: process.platform === "win32",
 });
 if (child.error) throw child.error;
 process.stdout.write(child.stdout);
@@ -107,7 +104,7 @@ process.exit(child.status ?? 1);
         strictEqual(result.command, process.execPath);
         deepStrictEqual(result.args, [shimType === "npm" ? shim : nodeEntry, command, "--lsp"]);
         strictEqual(result.options?.env?.ELECTRON_RUN_AS_NODE, "1");
-        // Start both the entry point and its Node subprocess, as vp does.
+        // vp must reuse process.execPath for its subprocess, without PATH shims.
         const child = spawnSync(result.command, result.args, {
           ...result.options,
           encoding: "utf8",

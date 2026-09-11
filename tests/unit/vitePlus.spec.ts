@@ -11,6 +11,9 @@ import { WORKSPACE_FOLDER, WORKSPACE_SECOND_FOLDER } from "../test-helpers";
 const shellEnv: typeof import("../../client/getShellEnv") = require(
   path.join(__dirname, "../client/getShellEnv.js"),
 );
+const findBinary: typeof import("../../client/findBinary") = require(
+  path.join(__dirname, "../client/findBinary.js"),
+);
 
 suite("Vite+ server selection", () => {
   const root = path.join(WORKSPACE_FOLDER.uri.fsPath, "vite-plus-tests");
@@ -276,4 +279,49 @@ suite("Vite+ server selection", () => {
     strictEqual((await service.getOxlintServerBinPath())?.path, secondPath);
     strictEqual((await service.getOxfmtServerBinPath())?.cwd, WORKSPACE_SECOND_FOLDER!.uri.fsPath);
   });
+
+  for (const change of ["none", "folder", "setting"] as const) {
+    test(`shares an ongoing search only when its context is unchanged (${change})`, async function () {
+      if (change === "folder" && (!secondRoot || !WORKSPACE_SECOND_FOLDER)) this.skip();
+      const firstPath = file("bin/first-vp.js");
+      const secondPath = file("bin/second-vp.js", "", change === "folder" ? secondRoot! : root);
+      await conf.update("path.vp", firstPath, ConfigurationTarget.WorkspaceFolder);
+      if (change === "folder") {
+        await workspace
+          .getConfiguration("oxc", WORKSPACE_SECOND_FOLDER!.uri)
+          .update("path.vp", secondPath, ConfigurationTarget.WorkspaceFolder);
+      }
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const searchSettingsBin = findBinary.searchSettingsBin;
+      let firstPathLookups = 0;
+      mock.method(
+        findBinary,
+        "searchSettingsBin",
+        async (name: string, configuredPath: string, cwd?: string) => {
+          if (configuredPath === firstPath) {
+            firstPathLookups++;
+            await gate;
+          }
+          return searchSettingsBin(name, configuredPath, cwd);
+        },
+      );
+      const first = service.getOxlintServerBinPath();
+      let second: ReturnType<ConfigService["getOxfmtServerBinPath"]>;
+      try {
+        if (change === "folder") await open(secondRoot!);
+        if (change === "setting") {
+          await conf.update("path.vp", secondPath, ConfigurationTarget.WorkspaceFolder);
+        }
+        second = service.getOxfmtServerBinPath();
+      } finally {
+        release();
+      }
+      strictEqual((await first)?.path, firstPath);
+      strictEqual((await second!)?.path, change === "none" ? firstPath : secondPath);
+      strictEqual(firstPathLookups, 1, "matching lint/fmt requests should share discovery");
+    });
+  }
 });

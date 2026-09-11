@@ -19,6 +19,13 @@ import {
   WorkspaceConfig,
 } from "./WorkspaceConfig";
 
+interface VitePlusSearchFolder {
+  root: string;
+  start: string;
+  enabled: boolean | null | undefined;
+  configuredPath: string | undefined;
+}
+
 export class ConfigService implements IDisposable {
   public static readonly namespace = "oxc";
   private readonly _disposables: IDisposable[] = [];
@@ -26,7 +33,7 @@ export class ConfigService implements IDisposable {
   public vsCodeConfig: VSCodeConfig;
 
   private workspaceConfigs: Map<string, WorkspaceConfig> = new Map();
-  private vitePlusSearch: Promise<BinarySearchResult | null> | undefined;
+  private readonly vitePlusSearches = new Map<string, Promise<BinarySearchResult | null>>();
 
   public onConfigChange:
     | ((this: ConfigService, config: ConfigurationChangeEvent) => Promise<void>)
@@ -140,43 +147,51 @@ export class ConfigService implements IDisposable {
   }
 
   private async searchVitePlus(): Promise<BinarySearchResult | null> {
-    // Lint and fmt share concurrent discovery, but restarts always re-read disk.
-    if (this.vitePlusSearch) return this.vitePlusSearch;
-    const search = this.resolveVitePlus();
-    this.vitePlusSearch = search;
-    try {
-      return await search;
-    } finally {
-      this.vitePlusSearch = undefined;
-    }
-  }
-
-  private async resolveVitePlus(): Promise<BinarySearchResult | null> {
     if (!workspace.isTrusted) return null;
 
     const documentUri = window.activeTextEditor?.document.uri;
     const activeFolder =
       documentUri?.scheme === "file" ? workspace.getWorkspaceFolder(documentUri) : undefined;
-    const folders = activeFolder ? [activeFolder] : (workspace.workspaceFolders ?? []);
+    const folders = (activeFolder ? [activeFolder] : (workspace.workspaceFolders ?? [])).map(
+      (folder): VitePlusSearchFolder => {
+        const config = workspace.getConfiguration(ConfigService.namespace, folder.uri);
+        return {
+          root: folder.uri.fsPath,
+          start: activeFolder && documentUri ? path.dirname(documentUri.fsPath) : folder.uri.fsPath,
+          enabled: config.get<boolean | null>("vitePlus.enable"),
+          configuredPath: config.get<string>("path.vp"),
+        };
+      },
+    );
+    // Share only searches with the same document context and settings. A slow
+    // search for another project must not select its binary after navigation.
+    const key = JSON.stringify(folders);
+    const pending = this.vitePlusSearches.get(key);
+    if (pending) return pending;
+    const search = this.resolveVitePlus(folders);
+    this.vitePlusSearches.set(key, search);
+    try {
+      return await search;
+    } finally {
+      this.vitePlusSearches.delete(key);
+    }
+  }
 
-    for (const folder of folders) {
-      const config = workspace.getConfiguration(ConfigService.namespace, folder.uri);
-      const enabled = config.get<boolean | null>("vitePlus.enable");
+  private async resolveVitePlus(
+    folders: VitePlusSearchFolder[],
+  ): Promise<BinarySearchResult | null> {
+    for (const { root, start, enabled, configuredPath } of folders) {
       if (enabled === false) continue;
-
-      const configuredPath = config.get<string>("path.vp");
-      const start =
-        activeFolder && documentUri ? path.dirname(documentUri.fsPath) : folder.uri.fsPath;
       if (configuredPath) {
         // An explicit vp path opts in without requiring a dependency declaration.
         // oxlint-disable-next-line no-await-in-loop -- workspace folder order is significant
-        const binary = await searchSettingsBin("vp", configuredPath, folder.uri.fsPath);
+        const binary = await searchSettingsBin("vp", configuredPath, root);
         if (!binary)
           throw new VitePlusError(`Invalid Vite+ binary: ${configuredPath}. Check oxc.path.vp.`);
-        return { ...binary, cwd: folder.uri.fsPath };
+        return { ...binary, cwd: root };
       }
 
-      const project = detectVitePlusProject(start, enabled === true, folder.uri.fsPath);
+      const project = detectVitePlusProject(start, enabled === true, root);
       if (!project) continue;
       // Global vp is eligible only after detection or explicit opt-in.
       // oxlint-disable no-await-in-loop -- global lookup requires a Vite+ project

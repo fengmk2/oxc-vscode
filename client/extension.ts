@@ -6,7 +6,6 @@ import StatusBarItemHandler from "./StatusBarItemHandler";
 import Formatter from "./tools/formatter";
 import Linter from "./tools/linter";
 import ToolInterface from "./tools/ToolInterface";
-import { disposeBundledNode } from "./bundledNode";
 
 const outputChannelName = "Oxc";
 const tools: ToolInterface[] = [];
@@ -110,6 +109,7 @@ export async function activate(context: ExtensionContext) {
   outputChannelFormat.info("Searching for oxfmt binary.");
   outputChannelLint.info("Searching for oxlint binary.");
 
+  const initialDocument = window.activeTextEditor?.document.uri.toString();
   const binaryPaths = await Promise.all(tools.map((tool) => tool.getBinary()));
 
   await Promise.all(
@@ -121,6 +121,20 @@ export async function activate(context: ExtensionContext) {
 
   // A window has one client per tool. Re-resolve on navigation, and restart
   // only when the executable, Vite+ command, or project directory changes.
+  const switchProject = async () => {
+    await Promise.all(
+      tools.map(async (tool) => {
+        try {
+          await tool.restart(true);
+        } catch (error) {
+          const output = tool instanceof Linter ? outputChannelLint : outputChannelFormat;
+          output.error(
+            `Failed to switch language server: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+    );
+  };
   context.subscriptions.push(
     window.onDidChangeActiveTextEditor((editor) => {
       if (
@@ -128,16 +142,14 @@ export async function activate(context: ExtensionContext) {
         !workspace.getWorkspaceFolder(editor.document.uri)
       )
         return;
-      for (const tool of tools) {
-        void tool.restart(true).catch((error) => {
-          const output = tool instanceof Linter ? outputChannelLint : outputChannelFormat;
-          output.error(
-            `Failed to switch language server: ${error instanceof Error ? error.message : String(error)}`,
-          );
-        });
-      }
+      void switchProject();
     }),
   );
+
+  // Navigation during binary discovery or server startup predates the listener.
+  if (window.activeTextEditor?.document.uri.toString() !== initialDocument) {
+    await switchProject();
+  }
 
   // Finally show the status bar item.
   statusBarItemHandler.show();
@@ -146,5 +158,4 @@ export async function activate(context: ExtensionContext) {
 export async function deactivate(): Promise<void> {
   await Promise.all(tools.map((tool) => tool.deactivate()));
   tools.length = 0;
-  disposeBundledNode();
 }

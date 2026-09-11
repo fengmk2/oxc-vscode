@@ -166,7 +166,19 @@ suite("detectVitePlusProject", () => {
     Object.defineProperty(process, "platform", { value: "win32" });
     pkg();
     file("node_modules/.bin/vp");
+    file("node_modules/.bin/vp.exe");
     const vpPath = shim();
     deepStrictEqual(detectVitePlusProject(root), { root, vpPath });
+  });
+
+  test("selects a local vp.exe shim on Windows before a hoisted vp.cmd", () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    pkg("packages/app");
+    shim();
+    const vpPath = file("packages/app/node_modules/.bin/vp.exe");
+    deepStrictEqual(detectVitePlusProject(path.join(root, "packages/app")), {
+      root: path.join(root, "packages/app"),
+      vpPath,
+    });
   });
 });

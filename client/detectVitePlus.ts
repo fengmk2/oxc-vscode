@@ -73,13 +73,11 @@ export function detectVitePlusProject(
 
   const root = dir;
   while (true) {
-    const vpPath = path.join(
-      dir,
-      "node_modules",
-      ".bin",
-      process.platform === "win32" ? "vp.cmd" : "vp",
-    );
-    if (existsSync(vpPath)) return { root, vpPath };
+    const binNames = process.platform === "win32" ? ["vp.cmd", "vp.exe"] : ["vp"];
+    for (const name of binNames) {
+      const vpPath = path.join(dir, "node_modules", ".bin", name);
+      if (existsSync(vpPath)) return { root, vpPath };
+    }
     if (isRootWorkspace(dir, pkg) || dir === path.dirname(dir)) return { root };
     dir = path.dirname(dir);
     pkg = readPackageJson(dir);

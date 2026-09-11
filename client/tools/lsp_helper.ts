@@ -5,7 +5,6 @@ import { Executable, MessageType, ShowMessageParams } from "vscode-languageclien
 import type { BinarySearchResult } from "../findBinary";
 import { getShellEnv } from "../getShellEnv";
 import { resolveVitePlusNodeEntry } from "../resolveVitePlusNodeEntry";
-import { bundledNodeDirectory } from "../bundledNode";
 
 export async function runExecutable(
   binary: BinarySearchResult,
@@ -48,10 +47,7 @@ export async function runExecutable(
   }
 
   if (path.isAbsolute(nodeCommand)) {
-    // vp also starts Node by name internally. Electron's executable is usually
-    // named Code/Code Helper, so its directory alone does not provide `node`.
-    const nodeDir =
-      binary.vitePlus && useExecPath ? bundledNodeDirectory() : path.dirname(nodeCommand);
+    const nodeDir = path.dirname(nodeCommand);
     serverEnv.PATH = `${nodeDir}${path.delimiter}${serverEnv.PATH ?? ""}`;
   }
 
