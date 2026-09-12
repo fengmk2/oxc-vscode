@@ -19,10 +19,12 @@ import {
   WorkspaceConfig,
 } from "./WorkspaceConfig";
 
+type BinarySource = "auto" | "vite-plus" | "oxc";
+
 interface VitePlusSearchFolder {
   root: string;
   start: string;
-  enabled: boolean | null | undefined;
+  source: BinarySource;
   configuredPath: string | undefined;
 }
 
@@ -133,9 +135,10 @@ export class ConfigService implements IDisposable {
       return searchSettingsBin(defaultBinaryName, settingsBinary);
     }
 
-    const vitePlus = await this.searchVitePlus();
+    const command = defaultBinaryName === "oxlint" ? "lint" : "fmt";
+    const vitePlus = await this.searchVitePlus(command);
     if (vitePlus) {
-      return { ...vitePlus, vitePlus: defaultBinaryName === "oxlint" ? "lint" : "fmt" };
+      return { ...vitePlus, vitePlus: command };
     }
 
     return (
@@ -146,7 +149,7 @@ export class ConfigService implements IDisposable {
     );
   }
 
-  private async searchVitePlus(): Promise<BinarySearchResult | null> {
+  private async searchVitePlus(command: "lint" | "fmt"): Promise<BinarySearchResult | null> {
     if (!workspace.isTrusted) return null;
 
     const documentUri = window.activeTextEditor?.document.uri;
@@ -158,7 +161,7 @@ export class ConfigService implements IDisposable {
         return {
           root: folder.uri.fsPath,
           start: activeFolder && documentUri ? path.dirname(documentUri.fsPath) : folder.uri.fsPath,
-          enabled: config.get<boolean | null>("vitePlus.enable"),
+          source: config.get<BinarySource>(`${command}.binarySource`) ?? "auto",
           configuredPath: config.get<string>("path.vp"),
         };
       },
@@ -180,8 +183,8 @@ export class ConfigService implements IDisposable {
   private async resolveVitePlus(
     folders: VitePlusSearchFolder[],
   ): Promise<BinarySearchResult | null> {
-    for (const { root, start, enabled, configuredPath } of folders) {
-      if (enabled === false) continue;
+    for (const { root, start, source, configuredPath } of folders) {
+      if (source === "oxc") continue;
       if (configuredPath) {
         // An explicit vp path opts in without requiring a dependency declaration.
         // oxlint-disable-next-line no-await-in-loop -- workspace folder order is significant
@@ -191,7 +194,7 @@ export class ConfigService implements IDisposable {
         return { ...binary, cwd: root };
       }
 
-      const project = detectVitePlusProject(start, enabled === true, root);
+      const project = detectVitePlusProject(start, source === "vite-plus", root);
       if (!project) continue;
       // Global vp is eligible only after detection or explicit opt-in.
       // oxlint-disable no-await-in-loop -- global lookup requires a Vite+ project

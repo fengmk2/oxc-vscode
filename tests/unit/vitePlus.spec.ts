@@ -42,6 +42,26 @@ suite("Vite+ server selection", () => {
     );
   }
 
+  function standaloneTools() {
+    const binaries = {
+      oxlint: { path: file("tools/oxlint.js"), loader: "node" as const },
+      oxfmt: { path: file("tools/oxfmt.js"), loader: "node" as const },
+    };
+    mock.method(
+      findBinary,
+      "searchProjectNodeModulesBin",
+      async (name: "oxlint" | "oxfmt") => binaries[name],
+    );
+    return binaries;
+  }
+
+  async function sources(lint: string, fmt: string) {
+    await Promise.all([
+      conf.update("lint.binarySource", lint, ConfigurationTarget.WorkspaceFolder),
+      conf.update("fmt.binarySource", fmt, ConfigurationTarget.WorkspaceFolder),
+    ]);
+  }
+
   async function open(dir = root) {
     await window.showTextDocument(Uri.file(file("index.txt", "", dir)));
   }
@@ -64,7 +84,7 @@ suite("Vite+ server selection", () => {
       const config = workspace.getConfiguration("oxc", folder.uri);
       // oxlint-disable-next-line no-await-in-loop -- reset each workspace folder
       await Promise.all(
-        ["path.vp", "vitePlus.enable"].map((key) =>
+        ["path.vp", "lint.binarySource", "fmt.binarySource"].map((key) =>
           config.update(key, undefined, ConfigurationTarget.WorkspaceFolder),
         ),
       );
@@ -86,17 +106,17 @@ suite("Vite+ server selection", () => {
     deepStrictEqual(fmt, { path: vpPath, loader: "native", cwd: root, vitePlus: "fmt" });
   });
 
-  test("explicit enable works without a package.json dependency", async () => {
+  test("explicit sources work without a package.json dependency", async () => {
     const vpPath = shim();
-    await conf.update("vitePlus.enable", true, ConfigurationTarget.WorkspaceFolder);
+    await sources("vite-plus", "vite-plus");
     strictEqual((await service.getOxlintServerBinPath())?.path, vpPath);
     strictEqual((await service.getOxfmtServerBinPath())?.vitePlus, "fmt");
   });
 
-  test("explicit enable keeps the same executable and cwd across source directories", async () => {
+  test("explicit sources keep the same executable and cwd across source directories", async () => {
     file("package.json", "{}");
     const vpPath = shim();
-    await conf.update("vitePlus.enable", true, ConfigurationTarget.WorkspaceFolder);
+    await sources("vite-plus", "vite-plus");
     await open(path.join(root, "src/pages"));
     const first = await service.getOxlintServerBinPath();
     await open(path.join(root, "src/components"));
@@ -144,6 +164,7 @@ suite("Vite+ server selection", () => {
   test("explicit tool paths take priority over Vite+ for each tool", async () => {
     declare();
     shim();
+    await sources("vite-plus", "vite-plus");
     const lintPath = file("custom/oxlint.js");
     const fmtPath = file("custom/oxfmt.js");
     await workspace.getConfiguration("oxc").update("path.oxlint", lintPath);
@@ -155,14 +176,83 @@ suite("Vite+ server selection", () => {
     strictEqual((await service.getOxfmtServerBinPath())?.vitePlus, undefined);
   });
 
-  test("false disables automatic detection and an explicit vp path", async () => {
+  test("standalone sources ignore detection and an invalid explicit vp path", async () => {
     declare();
-    const vpPath = shim();
-    await conf.update("path.vp", vpPath, ConfigurationTarget.WorkspaceFolder);
-    await conf.update("vitePlus.enable", false, ConfigurationTarget.WorkspaceFolder);
-    strictEqual((await service.getOxlintServerBinPath())?.vitePlus, undefined);
-    strictEqual((await service.getOxfmtServerBinPath())?.vitePlus, undefined);
+    shim();
+    const binaries = standaloneTools();
+    await conf.update("path.vp", "./missing-vp", ConfigurationTarget.WorkspaceFolder);
+    await sources("oxc", "oxc");
+    deepStrictEqual(await service.getOxlintServerBinPath(), binaries.oxlint);
+    deepStrictEqual(await service.getOxfmtServerBinPath(), binaries.oxfmt);
   });
+
+  for (const lintSource of ["auto", "vite-plus", "oxc"]) {
+    for (const fmtSource of ["auto", "vite-plus", "oxc"]) {
+      test(`selects tools independently: lint=${lintSource}, fmt=${fmtSource}`, async () => {
+        declare();
+        const vpPath = shim();
+        const binaries = standaloneTools();
+        await sources(lintSource, fmtSource);
+        const [lint, fmt] = await Promise.all([
+          service.getOxlintServerBinPath(),
+          service.getOxfmtServerBinPath(),
+        ]);
+        deepStrictEqual(
+          lint,
+          lintSource === "oxc"
+            ? binaries.oxlint
+            : { path: vpPath, loader: "native", cwd: root, vitePlus: "lint" },
+        );
+        deepStrictEqual(
+          fmt,
+          fmtSource === "oxc"
+            ? binaries.oxfmt
+            : { path: vpPath, loader: "native", cwd: root, vitePlus: "fmt" },
+        );
+      });
+    }
+  }
+
+  for (const command of ["lint", "fmt"] as const) {
+    test(`forcing ${command} does not opt the other tool in without a dependency`, async () => {
+      const vpPath = shim();
+      const binaries = standaloneTools();
+      await conf.update(
+        `${command}.binarySource`,
+        "vite-plus",
+        ConfigurationTarget.WorkspaceFolder,
+      );
+      const [lint, fmt] = await Promise.all([
+        service.getOxlintServerBinPath(),
+        service.getOxfmtServerBinPath(),
+      ]);
+      if (command === "lint") {
+        strictEqual(lint?.path, vpPath);
+        deepStrictEqual(fmt, binaries.oxfmt);
+      } else {
+        deepStrictEqual(lint, binaries.oxlint);
+        strictEqual(fmt?.path, vpPath);
+      }
+    });
+
+    test(`an explicit vp path respects the standalone ${command} source`, async () => {
+      const vpPath = file("bin/custom-vp.js");
+      const binaries = standaloneTools();
+      await conf.update("path.vp", vpPath, ConfigurationTarget.WorkspaceFolder);
+      await conf.update(`${command}.binarySource`, "oxc", ConfigurationTarget.WorkspaceFolder);
+      const [lint, fmt] = await Promise.all([
+        service.getOxlintServerBinPath(),
+        service.getOxfmtServerBinPath(),
+      ]);
+      if (command === "lint") {
+        deepStrictEqual(lint, binaries.oxlint);
+        strictEqual(fmt?.path, vpPath);
+      } else {
+        strictEqual(lint?.path, vpPath);
+        deepStrictEqual(fmt, binaries.oxfmt);
+      }
+    });
+  }
 
   test("root-declared-no-local-global-on-path", async () => {
     declare();
@@ -189,12 +279,13 @@ suite("Vite+ server selection", () => {
     process.env.PATH = binDir;
     strictEqual((await service.getOxlintServerBinPath())?.vitePlus, undefined);
     strictEqual((await service.getOxfmtServerBinPath())?.vitePlus, undefined);
-    await conf.update("vitePlus.enable", true, ConfigurationTarget.WorkspaceFolder);
+    await conf.update("lint.binarySource", "vite-plus", ConfigurationTarget.WorkspaceFolder);
     strictEqual(
       (await service.getOxlintServerBinPath())?.vitePlus,
       "lint",
       "explicit opt-in permits global resolution without a dependency",
     );
+    strictEqual((await service.getOxfmtServerBinPath())?.vitePlus, undefined);
   });
 
   test("discovers global vp using the same shell PATH as the launcher", async () => {
@@ -226,6 +317,16 @@ suite("Vite+ server selection", () => {
       vpPath,
       "missing installs must not be cached",
     );
+  });
+
+  test("explicit Vite+ sources report a missing install without falling back to standalone tools", async () => {
+    standaloneTools();
+    process.env.PATH = root;
+    mock.method(require("node:child_process"), "spawnSync", () => ({ status: 1 }));
+    mock.method(require("node:os"), "homedir", () => root);
+    await sources("vite-plus", "vite-plus");
+    await rejects(service.getOxlintServerBinPath(), /Vite\+ selected.*pnpm install/);
+    await rejects(service.getOxfmtServerBinPath(), /Vite\+ selected.*pnpm install/);
   });
 
   test("resolves vp from a global vite-plus package, not a package named vp", async () => {
@@ -280,11 +381,33 @@ suite("Vite+ server selection", () => {
     strictEqual((await service.getOxfmtServerBinPath())?.cwd, WORKSPACE_SECOND_FOLDER!.uri.fsPath);
   });
 
-  for (const change of ["none", "folder", "setting"] as const) {
+  test("source settings follow the active workspace folder independently for each tool", async function () {
+    if (!secondRoot || !WORKSPACE_SECOND_FOLDER) this.skip();
+    declare();
+    declare(secondRoot!);
+    const firstPath = shim();
+    const secondPath = shim(secondRoot!);
+    const binaries = standaloneTools();
+    await sources("oxc", "vite-plus");
+    const secondConf = workspace.getConfiguration("oxc", WORKSPACE_SECOND_FOLDER!.uri);
+    await secondConf.update("lint.binarySource", "vite-plus", ConfigurationTarget.WorkspaceFolder);
+    await secondConf.update("fmt.binarySource", "oxc", ConfigurationTarget.WorkspaceFolder);
+    deepStrictEqual(await service.getOxlintServerBinPath(), binaries.oxlint);
+    strictEqual((await service.getOxfmtServerBinPath())?.path, firstPath);
+    await open(secondRoot!);
+    strictEqual((await service.getOxlintServerBinPath())?.path, secondPath);
+    deepStrictEqual(await service.getOxfmtServerBinPath(), binaries.oxfmt);
+    await open();
+    deepStrictEqual(await service.getOxlintServerBinPath(), binaries.oxlint);
+    strictEqual((await service.getOxfmtServerBinPath())?.path, firstPath);
+  });
+
+  for (const change of ["none", "folder", "setting", "source"] as const) {
     test(`shares an ongoing search only when its context is unchanged (${change})`, async function () {
       if (change === "folder" && (!secondRoot || !WORKSPACE_SECOND_FOLDER)) this.skip();
       const firstPath = file("bin/first-vp.js");
       const secondPath = file("bin/second-vp.js", "", change === "folder" ? secondRoot! : root);
+      const standalone = change === "source" ? standaloneTools() : undefined;
       await conf.update("path.vp", firstPath, ConfigurationTarget.WorkspaceFolder);
       if (change === "folder") {
         await workspace
@@ -315,12 +438,18 @@ suite("Vite+ server selection", () => {
         if (change === "setting") {
           await conf.update("path.vp", secondPath, ConfigurationTarget.WorkspaceFolder);
         }
+        if (change === "source") {
+          await conf.update("fmt.binarySource", "oxc", ConfigurationTarget.WorkspaceFolder);
+        }
         second = service.getOxfmtServerBinPath();
       } finally {
         release();
       }
       strictEqual((await first)?.path, firstPath);
-      strictEqual((await second!)?.path, change === "none" ? firstPath : secondPath);
+      strictEqual(
+        (await second!)?.path,
+        standalone?.oxfmt.path ?? (change === "none" ? firstPath : secondPath),
+      );
       strictEqual(firstPathLookups, 1, "matching lint/fmt requests should share discovery");
     });
   }
