@@ -374,7 +374,7 @@ export default class FormatterTool implements ToolInterface {
     const clientOptions: LanguageClientOptions = {
       // Register the server for plain text documents
       documentSelector: this.documentSelectors,
-      initializationOptions: this.configService.formatterServerConfig,
+      initializationOptions: this.configService.getFormatterServerConfig(!!binary.vitePlus),
       outputChannel: this.outputChannel,
       traceOutputChannel: this.outputChannel,
       middleware: {
@@ -389,8 +389,9 @@ export default class FormatterTool implements ToolInterface {
               }
 
               return (
-                this.configService.getWorkspaceConfig(Uri.parse(item.scopeUri))?.toOxfmtConfig() ??
-                null
+                this.configService
+                  .getWorkspaceConfig(Uri.parse(item.scopeUri))
+                  ?.toOxfmtConfig(!!this.binary?.vitePlus) ?? null
               );
             });
           },
@@ -504,11 +505,12 @@ export default class FormatterTool implements ToolInterface {
     }
 
     // update the initializationOptions for a possible restart
-    this.client.clientOptions.initializationOptions = this.configService.formatterServerConfig;
+    const settings = this.configService.getFormatterServerConfig(!!this.binary?.vitePlus);
+    this.client.clientOptions.initializationOptions = settings;
 
     if (this.configService.effectsWorkspaceConfigChange(event) && this.client.isRunning()) {
       await this.client.sendNotification("workspace/didChangeConfiguration", {
-        settings: this.configService.formatterServerConfig,
+        settings,
       });
     }
   }

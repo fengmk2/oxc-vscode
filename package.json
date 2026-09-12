@@ -216,7 +216,7 @@
           "type": "boolean",
           "scope": "resource",
           "default": false,
-          "markdownDescription": "Disable searching for nested configuration files. When set to true, only the configuration file specified in `oxc.configPath` (if any) will be used."
+          "markdownDescription": "Disable searching for nested configuration files. When set to true, only the configuration file specified in `oxc.configPath` (if any) will be used. The extension always sends `true` when using `vp lint --lsp`."
         },
         "oxc.fixKind": {
           "type": [
@@ -301,7 +301,7 @@
           "type": "boolean",
           "scope": "resource",
           "default": false,
-          "markdownDescription": "Disable searching for nested configuration files. When set to true, only the configuration file specified in `oxc.fmt.configPath` (if any) will be used."
+          "markdownDescription": "Disable searching for nested configuration files. When set to true, only the configuration file specified in `oxc.fmt.configPath` (if any) will be used. The extension always sends `true` when using `vp fmt --lsp`."
         },
         "oxc.suppressProgramErrors": {
           "type": "boolean",

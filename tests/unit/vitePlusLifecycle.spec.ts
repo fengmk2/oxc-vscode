@@ -1,8 +1,9 @@
-import { strictEqual } from "assert";
+import { deepStrictEqual, ok, strictEqual } from "assert";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { mock } from "node:test";
-import { window, workspace } from "vscode";
+import { CancellationTokenSource, ConfigurationTarget, window, workspace } from "vscode";
+import type { LanguageClient } from "vscode-languageclient/node";
 import { ConfigService } from "../../client/ConfigService";
 import {
   BinarySearchResult,
@@ -51,8 +52,91 @@ for (const [Tool, command, getter] of [
       mock.restoreAll();
       clearGlobalNodeModulesPathsCache();
       await workspace.getConfiguration("oxc").update("enable", undefined);
+      await workspace
+        .getConfiguration("oxc", WORKSPACE_FOLDER.uri)
+        .update(
+          command === "lint" ? "disableNestedConfig" : "fmt.disableNestedConfig",
+          undefined,
+          ConfigurationTarget.WorkspaceFolder,
+        );
       rmSync(root, { recursive: true, force: true });
     });
+
+    for (const userSetting of [false, true]) {
+      test(`disables nested configs only for Vite+ with user setting ${userSetting}`, async () => {
+        const key = command === "lint" ? "disableNestedConfig" : "fmt.disableNestedConfig";
+        const config = workspace.getConfiguration("oxc", WORKSPACE_FOLDER.uri);
+        await config.update(key, userSetting, ConfigurationTarget.WorkspaceFolder);
+        service.getWorkspaceConfig(WORKSPACE_FOLDER.uri)!.refresh();
+        const event = { affectsConfiguration: (section: string) => section === `oxc.${key}` };
+
+        const check = async (expected: boolean) => {
+          const client = (tool as unknown as { client: LanguageClient }).client;
+          const optionsForWorkspace = (settings: { workspaceUri: string; options: unknown }[]) =>
+            settings.find(({ workspaceUri }) => workspaceUri === WORKSPACE_FOLDER.uri.toString())!
+              .options;
+          const assertOptions = (options: unknown) => {
+            const values = options as Record<string, unknown>;
+            strictEqual(values[key], expected);
+            if (command === "lint") {
+              strictEqual(
+                (values.flags as Record<string, string>).disable_nested_config,
+                String(expected),
+              );
+            }
+          };
+
+          assertOptions(optionsForWorkspace(client.clientOptions.initializationOptions));
+          const cancellation = new CancellationTokenSource();
+          try {
+            const pulled = await client.clientOptions.middleware!.workspace!.configuration!(
+              {
+                items: [
+                  { section: "oxc_language_server", scopeUri: WORKSPACE_FOLDER.uri.toString() },
+                  { section: "unrelated", scopeUri: WORKSPACE_FOLDER.uri.toString() },
+                  { section: "oxc_language_server" },
+                ],
+              },
+              cancellation.token,
+              async () => [],
+            );
+            ok(Array.isArray(pulled));
+            assertOptions(pulled[0]);
+            deepStrictEqual(pulled.slice(1), [null, null]);
+          } finally {
+            cancellation.dispose();
+          }
+
+          const running = mock.method(client, "isRunning", () => true);
+          const notification = mock.method(client, "sendNotification", async () => {});
+          try {
+            await tool.onConfigChange(event);
+            strictEqual(notification.mock.callCount(), 1);
+            const [method, params] = notification.mock.calls[0].arguments;
+            strictEqual(method, "workspace/didChangeConfiguration");
+            assertOptions(optionsForWorkspace(params.settings));
+            assertOptions(optionsForWorkspace(client.clientOptions.initializationOptions));
+          } finally {
+            running.mock.restore();
+            notification.mock.restore();
+          }
+          strictEqual(
+            workspace.getConfiguration("oxc", WORKSPACE_FOLDER.uri).get(key),
+            userSetting,
+            "the saved setting must not change",
+          );
+        };
+
+        await check(true);
+        const vitePlus = selected;
+        selected = { path: selected.path, loader: "node" };
+        await tool.restart(true);
+        await check(userSetting);
+        selected = vitePlus;
+        await tool.restart(true);
+        await check(true);
+      });
+    }
 
     test("keeps the client for unchanged binaries and replaces it when the project or mode changes", async () => {
       const activation = mock.method(tool, "activate", tool.activate.bind(tool));

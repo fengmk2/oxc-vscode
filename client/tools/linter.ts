@@ -288,7 +288,7 @@ export default class LinterTool implements ToolInterface {
           scheme: "file",
         },
       ],
-      initializationOptions: this.configService.oxlintServerConfig,
+      initializationOptions: this.configService.getOxlintServerConfig(!!binary.vitePlus),
       outputChannel: this.outputChannel,
       traceOutputChannel: this.outputChannel,
       diagnosticPullOptions: {
@@ -345,8 +345,9 @@ export default class LinterTool implements ToolInterface {
               }
 
               return (
-                this.configService.getWorkspaceConfig(Uri.parse(item.scopeUri))?.toOxlintConfig() ??
-                null
+                this.configService
+                  .getWorkspaceConfig(Uri.parse(item.scopeUri))
+                  ?.toOxlintConfig(!!this.binary?.vitePlus) ?? null
               );
             });
           },
@@ -479,11 +480,12 @@ export default class LinterTool implements ToolInterface {
     }
 
     // update the initializationOptions for a possible restart
-    this.client.clientOptions.initializationOptions = this.configService.oxlintServerConfig;
+    const settings = this.configService.getOxlintServerConfig(!!this.binary?.vitePlus);
+    this.client.clientOptions.initializationOptions = settings;
 
     if (this.configService.effectsWorkspaceConfigChange(event) && this.client.isRunning()) {
       await this.client.sendNotification("workspace/didChangeConfiguration", {
-        settings: this.configService.oxlintServerConfig,
+        settings,
       });
     }
   }

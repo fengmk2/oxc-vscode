@@ -58,12 +58,12 @@ export class ConfigService implements IDisposable {
     this._disposables.push(disposeChangeListener);
   }
 
-  public get oxlintServerConfig(): {
+  public getOxlintServerConfig(isVitePlus = false): {
     workspaceUri: string;
     options: OxlintWorkspaceConfigInterface;
   }[] {
     return [...this.workspaceConfigs.entries()].map(([path, config]) => {
-      const options = config.toOxlintConfig();
+      const options = config.toOxlintConfig(isVitePlus);
 
       return {
         workspaceUri: Uri.file(path).toString(),
@@ -72,13 +72,13 @@ export class ConfigService implements IDisposable {
     });
   }
 
-  public get formatterServerConfig(): {
+  public getFormatterServerConfig(isVitePlus = false): {
     workspaceUri: string;
     options: OxfmtWorkspaceConfigInterface;
   }[] {
     return [...this.workspaceConfigs.entries()].map(([path, config]) => ({
       workspaceUri: Uri.file(path).toString(),
-      options: config.toOxfmtConfig(),
+      options: config.toOxfmtConfig(isVitePlus),
     }));
   }
 
