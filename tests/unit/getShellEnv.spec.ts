@@ -12,9 +12,7 @@ let moduleId = 0;
 
 async function loadFreshGetShellEnvModule(): Promise<GetShellEnvModule> {
   // append a query parameter to force a fresh import of the module to reset the cachedEnv variable
-  const module = await import(`../../client/getShellEnv.ts?testModule=${moduleId++}`);
-
-  return module;
+  return import(`../../client/getShellEnv.ts?testModule=${moduleId++}`);
 }
 
 function createMockShellScript(dir: string, name: string, scriptBody: string): string {

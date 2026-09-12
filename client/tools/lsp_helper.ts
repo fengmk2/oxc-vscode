@@ -52,17 +52,21 @@ export async function runExecutable(
   const args = binary.vitePlus ? [binary.vitePlus, "--lsp"] : ["--lsp"];
 
   if (isNode || (useExecPath && !binary.vitePlus)) {
+    const nodeArgs = [binary.path, ...args];
     // Yarn PnP needs loaders for both CJS require() and ESM imports.
-    const pnpArgs: string[] = [];
     if (isNode && binary.yarnPnpLoaderPath) {
-      pnpArgs.push("--require", binary.yarnPnpLoaderPath);
       const esmLoaderPath = path.join(path.dirname(binary.yarnPnpLoaderPath), ".pnp.loader.mjs");
-      pnpArgs.push("--loader", pathToFileURL(esmLoaderPath).href);
+      nodeArgs.unshift(
+        "--require",
+        binary.yarnPnpLoaderPath,
+        "--loader",
+        pathToFileURL(esmLoaderPath).href,
+      );
     }
 
     return {
       command: nodeCommand,
-      args: [...pnpArgs, binary.path, ...args],
+      args: nodeArgs,
       options: {
         cwd: binary.cwd,
         env: serverEnv,

@@ -60,23 +60,18 @@ async function searchNodeModulesDefaultBinPath(
     binaryCandidates(path.join(folder, ".bin"), binaryName),
   );
 
-  const exists = await Promise.all(
+  const binaries = await Promise.all(
     candidates.map(async (candidate) => {
       try {
         await workspace.fs.stat(Uri.file(candidate));
-        return true;
+        return { path: candidate, loader: "native" } as const;
       } catch {
-        return false;
+        return undefined;
       }
     }),
   );
 
-  const firstExistingCandidateIndex = exists.findIndex(Boolean);
-  if (firstExistingCandidateIndex === -1) {
-    return undefined;
-  }
-
-  return { path: candidates[firstExistingCandidateIndex], loader: "native" };
+  return binaries.find(Boolean);
 }
 /**
  * Returns node_modules paths derived from all package.json files found in the workspace.

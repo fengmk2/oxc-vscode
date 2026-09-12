@@ -242,7 +242,7 @@ export default class LinterTool implements ToolInterface {
       const message = this.binaryError ?? "No valid oxlint binary found.";
       this.statusBarItemHandler.updateTool("linter", false, message);
       this.outputChannel.warn(message);
-      return Promise.resolve();
+      return;
     }
 
     this.allowedToStartServer =
@@ -413,19 +413,17 @@ export default class LinterTool implements ToolInterface {
     this.applyAllFixesCommand.dispose();
   }
 
-  async toggleClient(configService: ConfigService): Promise<void> {
+  async toggleClient(): Promise<void> {
     if (this.client === undefined || !this.allowedToStartServer) {
       return;
     }
 
     if (this.client.isRunning()) {
-      if (!configService.vsCodeConfig.enableOxlint) {
+      if (!this.configService.vsCodeConfig.enableOxlint) {
         await this.client.stop();
       }
-    } else {
-      if (configService.vsCodeConfig.enableOxlint) {
-        await this.startClient();
-      }
+    } else if (this.configService.vsCodeConfig.enableOxlint) {
+      await this.startClient();
     }
   }
 
@@ -474,7 +472,7 @@ export default class LinterTool implements ToolInterface {
       event.affectsConfiguration(`${ConfigService.namespace}.enable`) ||
       event.affectsConfiguration(`${ConfigService.namespace}.enable.oxlint`)
     ) {
-      await this.toggleClient(this.configService); // update the client state
+      await this.toggleClient();
     }
     this.updateStatusBar(this.configService.vsCodeConfig.enableOxlint);
 

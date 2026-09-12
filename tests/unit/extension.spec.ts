@@ -56,10 +56,10 @@ suite("navigation during extension activation", () => {
       const ready = new Promise<void>((resolve) => {
         entered = resolve;
       });
-      const wait = async () => {
+      async function wait(): Promise<void> {
         if (++waiting === 2) entered();
         await gate;
-      };
+      }
       const selected = new Map<string, string>();
       for (const [Tool, name] of [
         [Linter, "lint"],

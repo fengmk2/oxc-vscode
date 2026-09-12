@@ -350,12 +350,11 @@ export default class FormatterTool implements ToolInterface {
 
   async activate(binary?: BinarySearchResult): Promise<void> {
     this.binary = binary;
-    // No valid binary found for the formatter.
     if (!binary) {
       const message = this.binaryError ?? "No valid oxfmt binary found.";
       this.statusBarItemHandler.updateTool("formatter", false, message);
       this.outputChannel.warn(message);
-      return Promise.resolve();
+      return;
     }
 
     this.outputChannel.info(`Using server binary at: ${binary.path}`);
@@ -481,10 +480,8 @@ export default class FormatterTool implements ToolInterface {
       if (!this.configService.vsCodeConfig.enableOxfmt) {
         await this.client.stop();
       }
-    } else {
-      if (this.configService.vsCodeConfig.enableOxfmt) {
-        await this.startClient();
-      }
+    } else if (this.configService.vsCodeConfig.enableOxfmt) {
+      await this.startClient();
     }
   }
 
@@ -499,7 +496,7 @@ export default class FormatterTool implements ToolInterface {
       event.affectsConfiguration(`${ConfigService.namespace}.enable`) ||
       event.affectsConfiguration(`${ConfigService.namespace}.enable.oxfmt`)
     ) {
-      await this.toggleClient(); // update the client state
+      await this.toggleClient();
     }
     this.updateStatusBar();
 
@@ -524,7 +521,7 @@ export default class FormatterTool implements ToolInterface {
     this.formatActionProvider.dispose();
   }
 
-  private updateStatusBar() {
+  private updateStatusBar(): void {
     const enable = this.configService.vsCodeConfig.enableOxfmt;
 
     let text =

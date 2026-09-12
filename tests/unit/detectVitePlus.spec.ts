@@ -16,7 +16,10 @@ suite("detectVitePlusProject", () => {
     return target;
   }
 
-  function pkg(relative = "", value: object = { devDependencies: { "vite-plus": "latest" } }) {
+  function pkg(
+    relative = "",
+    value: object = { devDependencies: { "vite-plus": "latest" } },
+  ): string {
     return file(path.join(relative, "package.json"), JSON.stringify(value));
   }
 

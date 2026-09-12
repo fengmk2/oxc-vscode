@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { mock } from "node:test";
 import { commands, ConfigurationTarget, Uri, window, workspace } from "vscode";
 import { ConfigService } from "../../client/ConfigService";
+import type { BinarySearchResult } from "../../client/findBinary";
 import { runExecutable } from "../../client/tools/lsp_helper";
 import { WORKSPACE_FOLDER, WORKSPACE_SECOND_FOLDER } from "../test-helpers";
 import { mockProcessEnv, mockProcessPlatform } from "../processMocks";
@@ -32,11 +33,11 @@ suite("Vite+ server selection", () => {
     return target;
   }
 
-  function declare(dir = root) {
+  function declare(dir = root): void {
     file("package.json", JSON.stringify({ devDependencies: { "vite-plus": "latest" } }), dir);
   }
 
-  function shim(dir = root) {
+  function shim(dir = root): string {
     return file(
       path.join("node_modules/.bin", process.platform === "win32" ? "vp.cmd" : "vp"),
       "",
@@ -44,7 +45,7 @@ suite("Vite+ server selection", () => {
     );
   }
 
-  function standaloneTools() {
+  function standaloneTools(): Record<"oxlint" | "oxfmt", BinarySearchResult> {
     const binaries = {
       oxlint: { path: file("tools/oxlint.js"), loader: "node" as const },
       oxfmt: { path: file("tools/oxfmt.js"), loader: "node" as const },
@@ -57,14 +58,14 @@ suite("Vite+ server selection", () => {
     return binaries;
   }
 
-  async function sources(lint: string, fmt: string) {
+  async function sources(lint: string, fmt: string): Promise<void> {
     await Promise.all([
       conf.update("lint.binarySource", lint, ConfigurationTarget.WorkspaceFolder),
       conf.update("fmt.binarySource", fmt, ConfigurationTarget.WorkspaceFolder),
     ]);
   }
 
-  async function open(dir = root) {
+  async function open(dir = root): Promise<void> {
     await window.showTextDocument(Uri.file(file("index.txt", "", dir)));
   }
 
