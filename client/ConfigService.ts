@@ -1,8 +1,7 @@
 import * as path from "node:path";
 import { ConfigurationChangeEvent, Uri, window, workspace, WorkspaceFolder } from "vscode";
-import { detectVitePlusProject, VitePlusError } from "./detectVitePlus";
-import { getShellEnv } from "./getShellEnv";
 import { DiagnosticPullMode } from "vscode-languageclient";
+import { detectVitePlusProject, VitePlusError } from "./detectVitePlus";
 import {
   BinarySearchResult,
   clearGlobalNodeModulesPathsCache,
@@ -12,6 +11,7 @@ import {
   searchSettingsBin,
   searchYarnPnpBin,
 } from "./findBinary";
+import { getShellEnv } from "./getShellEnv";
 import { IDisposable } from "./types";
 import { VSCodeConfig } from "./VSCodeConfig";
 import {
@@ -62,14 +62,10 @@ export class ConfigService implements IDisposable {
     workspaceUri: string;
     options: OxlintWorkspaceConfigInterface;
   }[] {
-    return [...this.workspaceConfigs.entries()].map(([path, config]) => {
-      const options = config.toOxlintConfig(isVitePlus);
-
-      return {
-        workspaceUri: Uri.file(path).toString(),
-        options,
-      };
-    });
+    return [...this.workspaceConfigs.entries()].map(([path, config]) => ({
+      workspaceUri: Uri.file(path).toString(),
+      options: config.toOxlintConfig(isVitePlus),
+    }));
   }
 
   public getFormatterServerConfig(isVitePlus = false): {
@@ -156,33 +152,38 @@ export class ConfigService implements IDisposable {
   }
 
   private async searchVitePlus(command: "lint" | "fmt"): Promise<BinarySearchResult | null> {
-    if (!workspace.isTrusted) return null;
+    if (!workspace.isTrusted) {
+      return null;
+    }
 
     const documentUri = window.activeTextEditor?.document.uri;
     const activeFolder =
       documentUri?.scheme === "file" ? workspace.getWorkspaceFolder(documentUri) : undefined;
-    const folders = (activeFolder ? [activeFolder] : (workspace.workspaceFolders ?? [])).map(
-      (folder): VitePlusSearchFolder => {
-        const config = workspace.getConfiguration(ConfigService.namespace, folder.uri);
-        return {
-          root: folder.uri.fsPath,
-          start: activeFolder && documentUri ? path.dirname(documentUri.fsPath) : folder.uri.fsPath,
-          source: config.get<BinarySource>(`${command}.binarySource`) ?? "auto",
-          configuredPath: config.get<string>("path.vp"),
-        };
-      },
-    );
+    const workspaceFolders = activeFolder ? [activeFolder] : (workspace.workspaceFolders ?? []);
+    const folders = workspaceFolders.map((folder): VitePlusSearchFolder => {
+      const config = workspace.getConfiguration(ConfigService.namespace, folder.uri);
+      return {
+        root: folder.uri.fsPath,
+        start: activeFolder && documentUri ? path.dirname(documentUri.fsPath) : folder.uri.fsPath,
+        source: config.get<BinarySource>(`${command}.binarySource`) ?? "auto",
+        configuredPath: config.get<string>("path.vp"),
+      };
+    });
     // Share only searches with the same document context and settings. A slow
     // search for another project must not select its binary after navigation.
     const key = JSON.stringify(folders);
     const pending = this.vitePlusSearches.get(key);
-    if (pending) return pending;
+    if (pending) {
+      return pending;
+    }
     const search = this.resolveVitePlus(folders);
     this.vitePlusSearches.set(key, search);
     try {
       return await search;
     } finally {
-      if (this.vitePlusSearches.get(key) === search) this.vitePlusSearches.delete(key);
+      if (this.vitePlusSearches.get(key) === search) {
+        this.vitePlusSearches.delete(key);
+      }
     }
   }
 
@@ -190,24 +191,31 @@ export class ConfigService implements IDisposable {
     folders: VitePlusSearchFolder[],
   ): Promise<BinarySearchResult | null> {
     for (const { root, start, source, configuredPath } of folders) {
-      if (source === "oxc") continue;
+      if (source === "oxc") {
+        continue;
+      }
       if (configuredPath) {
         // An explicit vp path opts in without requiring a dependency declaration.
         // oxlint-disable-next-line no-await-in-loop -- workspace folder order is significant
         const binary = await searchSettingsBin("vp", configuredPath, root);
-        if (!binary)
+        if (!binary) {
           throw new VitePlusError(`Invalid Vite+ binary: ${configuredPath}. Check oxc.path.vp.`);
+        }
         return { ...binary, cwd: root };
       }
 
       const project = detectVitePlusProject(start, source === "vite-plus", root);
-      if (!project) continue;
+      if (!project) {
+        continue;
+      }
+      if (project.vpPath) {
+        return { path: project.vpPath, loader: "native", cwd: project.root };
+      }
       // Global vp is eligible only after detection or explicit opt-in.
       // oxlint-disable no-await-in-loop -- global lookup requires a Vite+ project
-      const binary: BinarySearchResult | undefined = project.vpPath
-        ? { path: project.vpPath, loader: "native" }
-        : ((await searchEnvPath("vp", await getShellEnv())) ??
-          (await searchGlobalNodeModulesBin("vp", "vite-plus")));
+      const binary =
+        (await searchEnvPath("vp", await getShellEnv())) ??
+        (await searchGlobalNodeModulesBin("vp", "vite-plus"));
       // oxlint-enable no-await-in-loop
       if (!binary) {
         throw new VitePlusError(

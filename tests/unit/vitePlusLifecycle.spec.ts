@@ -2,7 +2,13 @@ import { deepStrictEqual, ok, strictEqual } from "assert";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { mock } from "node:test";
-import { CancellationTokenSource, ConfigurationTarget, window, workspace } from "vscode";
+import {
+  CancellationTokenSource,
+  ConfigurationTarget,
+  LogOutputChannel,
+  window,
+  workspace,
+} from "vscode";
 import type { LanguageClient } from "vscode-languageclient/node";
 import { ConfigService } from "../../client/ConfigService";
 import {
@@ -15,17 +21,34 @@ import Formatter from "../../client/tools/formatter";
 import Linter from "../../client/tools/linter";
 import { WORKSPACE_FOLDER } from "../test-helpers";
 
+function getWorkspaceOptions(settings: { workspaceUri: string; options: unknown }[]): unknown {
+  return settings.find(({ workspaceUri }) => workspaceUri === WORKSPACE_FOLDER.uri.toString())!
+    .options;
+}
+
 for (const [Tool, command, getter] of [
   [Linter, "lint", "getOxlintServerBinPath"],
   [Formatter, "fmt", "getOxfmtServerBinPath"],
 ] as const) {
   suite(`Vite+ ${command} lifecycle`, () => {
     const root = path.join(WORKSPACE_FOLDER.uri.fsPath, `vp-${command}-lifecycle`);
+    const nestedConfigKey = command === "lint" ? "disableNestedConfig" : "fmt.disableNestedConfig";
     let service: ConfigService;
     let tool: Linter | Formatter;
-    let output: ReturnType<typeof window.createOutputChannel>;
+    let output: LogOutputChannel;
     let status: StatusBarItemHandler;
     let selected: BinarySearchResult;
+
+    function assertNestedConfig(options: unknown, expected: boolean): void {
+      const values = options as Record<string, unknown>;
+      strictEqual(values[nestedConfigKey], expected);
+      if (command === "lint") {
+        strictEqual(
+          (values.flags as Record<string, string>).disable_nested_config,
+          String(expected),
+        );
+      }
+    }
 
     setup(async () => {
       // No server needs to run to exercise client replacement on navigation.
@@ -36,10 +59,9 @@ for (const [Tool, command, getter] of [
       selected = { path: vpPath, loader: "node", vitePlus: command, cwd: root };
       service = new ConfigService();
       mock.method(service, getter, async () => selected);
-      const channel = window.createOutputChannel(`Vite+ ${command} lifecycle`, { log: true });
-      output = channel;
+      output = window.createOutputChannel(`Vite+ ${command} lifecycle`, { log: true });
       status = new StatusBarItemHandler("test");
-      tool = new Tool(channel, service, status);
+      tool = new Tool(output, service, status);
       await tool.activate(selected);
     });
 
@@ -54,39 +76,26 @@ for (const [Tool, command, getter] of [
       await workspace.getConfiguration("oxc").update("enable", undefined);
       await workspace
         .getConfiguration("oxc", WORKSPACE_FOLDER.uri)
-        .update(
-          command === "lint" ? "disableNestedConfig" : "fmt.disableNestedConfig",
-          undefined,
-          ConfigurationTarget.WorkspaceFolder,
-        );
+        .update(nestedConfigKey, undefined, ConfigurationTarget.WorkspaceFolder);
       rmSync(root, { recursive: true, force: true });
     });
 
     for (const userSetting of [false, true]) {
       test(`disables nested configs only for Vite+ with user setting ${userSetting}`, async () => {
-        const key = command === "lint" ? "disableNestedConfig" : "fmt.disableNestedConfig";
         const config = workspace.getConfiguration("oxc", WORKSPACE_FOLDER.uri);
-        await config.update(key, userSetting, ConfigurationTarget.WorkspaceFolder);
+        await config.update(nestedConfigKey, userSetting, ConfigurationTarget.WorkspaceFolder);
         service.getWorkspaceConfig(WORKSPACE_FOLDER.uri)!.refresh();
-        const event = { affectsConfiguration: (section: string) => section === `oxc.${key}` };
+        const event = {
+          affectsConfiguration: (section: string) => section === `oxc.${nestedConfigKey}`,
+        };
 
-        const check = async (expected: boolean) => {
+        async function checkClientConfig(expected: boolean): Promise<void> {
           const client = (tool as unknown as { client: LanguageClient }).client;
-          const optionsForWorkspace = (settings: { workspaceUri: string; options: unknown }[]) =>
-            settings.find(({ workspaceUri }) => workspaceUri === WORKSPACE_FOLDER.uri.toString())!
-              .options;
-          const assertOptions = (options: unknown) => {
-            const values = options as Record<string, unknown>;
-            strictEqual(values[key], expected);
-            if (command === "lint") {
-              strictEqual(
-                (values.flags as Record<string, string>).disable_nested_config,
-                String(expected),
-              );
-            }
-          };
 
-          assertOptions(optionsForWorkspace(client.clientOptions.initializationOptions));
+          assertNestedConfig(
+            getWorkspaceOptions(client.clientOptions.initializationOptions),
+            expected,
+          );
           const cancellation = new CancellationTokenSource();
           try {
             const pulled = await client.clientOptions.middleware!.workspace!.configuration!(
@@ -101,7 +110,7 @@ for (const [Tool, command, getter] of [
               async () => [],
             );
             ok(Array.isArray(pulled));
-            assertOptions(pulled[0]);
+            assertNestedConfig(pulled[0], expected);
             deepStrictEqual(pulled.slice(1), [null, null]);
           } finally {
             cancellation.dispose();
@@ -114,27 +123,30 @@ for (const [Tool, command, getter] of [
             strictEqual(notification.mock.callCount(), 1);
             const [method, params] = notification.mock.calls[0].arguments;
             strictEqual(method, "workspace/didChangeConfiguration");
-            assertOptions(optionsForWorkspace(params.settings));
-            assertOptions(optionsForWorkspace(client.clientOptions.initializationOptions));
+            assertNestedConfig(getWorkspaceOptions(params.settings), expected);
+            assertNestedConfig(
+              getWorkspaceOptions(client.clientOptions.initializationOptions),
+              expected,
+            );
           } finally {
             running.mock.restore();
             notification.mock.restore();
           }
           strictEqual(
-            workspace.getConfiguration("oxc", WORKSPACE_FOLDER.uri).get(key),
+            workspace.getConfiguration("oxc", WORKSPACE_FOLDER.uri).get(nestedConfigKey),
             userSetting,
             "the saved setting must not change",
           );
-        };
+        }
 
-        await check(true);
+        await checkClientConfig(true);
         const vitePlus = selected;
         selected = { path: selected.path, loader: "node" };
         await tool.restart(true);
-        await check(userSetting);
+        await checkClientConfig(userSetting);
         selected = vitePlus;
         await tool.restart(true);
-        await check(true);
+        await checkClientConfig(true);
       });
     }
 

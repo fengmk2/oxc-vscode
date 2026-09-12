@@ -1,6 +1,5 @@
 import { promises as fsPromises } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
-import { VitePlusError } from "../detectVitePlus";
 
 import {
   CodeActionKind,
@@ -29,11 +28,12 @@ import {
 
 import { OxcCommands } from "../commands";
 import { ConfigService } from "../ConfigService";
+import { VitePlusError } from "../detectVitePlus";
+import type { BinarySearchResult } from "../findBinary";
 import StatusBarItemHandler from "../StatusBarItemHandler";
 import { VSCodeConfig } from "../VSCodeConfig";
 import { onClientNotification, runExecutable } from "./lsp_helper";
 import ToolInterface from "./ToolInterface";
-import type { BinarySearchResult } from "../findBinary";
 
 const languageClientName = "oxc";
 
@@ -219,17 +219,20 @@ export default class LinterTool implements ToolInterface {
     try {
       bin = await this.configService.getOxlintServerBinPath();
     } catch (error) {
-      if (!(error instanceof VitePlusError)) throw error;
+      if (!(error instanceof VitePlusError)) {
+        throw error;
+      }
       this.binaryError = error.message;
       return undefined;
     }
-    if (bin) {
-      try {
-        await fsPromises.access(bin.path);
-        return bin;
-      } catch (e) {
-        this.outputChannel.error(`Invalid bin path: ${bin.path}`, e);
-      }
+    if (!bin) {
+      return undefined;
+    }
+    try {
+      await fsPromises.access(bin.path);
+      return bin;
+    } catch (error) {
+      this.outputChannel.error(`Invalid bin path: ${bin.path}`, error);
     }
   }
 
@@ -260,7 +263,7 @@ export default class LinterTool implements ToolInterface {
       debug: run,
     };
 
-    this.outputChannel.info(`Using server binary at: ${binary?.path}`);
+    this.outputChannel.info(`Using server binary at: ${binary.path}`);
 
     // see https://github.com/oxc-project/oxc/blob/9b475ad05b750f99762d63094174be6f6fc3c0eb/crates/oxc_linter/src/loader/partial_loader/mod.rs#L17-L20
     const supportedExtensions = [
@@ -337,10 +340,7 @@ export default class LinterTool implements ToolInterface {
         workspace: {
           configuration: (params: ConfigurationParams) => {
             return params.items.map((item) => {
-              if (item.section !== "oxc_language_server") {
-                return null;
-              }
-              if (item.scopeUri === undefined) {
+              if (item.section !== "oxc_language_server" || item.scopeUri === undefined) {
                 return null;
               }
 
@@ -433,15 +433,18 @@ export default class LinterTool implements ToolInterface {
 
   restart(onlyIfBinaryChanged = false): Promise<void> {
     const restart = this.restartQueue.then(async () => {
-      if (!onlyIfBinaryChanged) this.configService.clearBinarySearchCaches();
+      if (!onlyIfBinaryChanged) {
+        this.configService.clearBinarySearchCaches();
+      }
       const previousError = this.binaryError;
       const newBinary = await this.getBinary();
       if (
         onlyIfBinaryChanged &&
         isDeepStrictEqual(this.binary, newBinary) &&
         previousError === this.binaryError
-      )
+      ) {
         return;
+      }
       await this.stopClient();
       await this.activate(newBinary);
     });
@@ -454,7 +457,9 @@ export default class LinterTool implements ToolInterface {
       await this.client?.start();
       this.binaryError = undefined;
     } catch (error) {
-      if (!this.binary?.vitePlus) throw error;
+      if (!this.binary?.vitePlus) {
+        throw error;
+      }
       this.binaryError = `Failed to start Vite+ ${this.binary.vitePlus} --lsp. Install or upgrade vite-plus in ${this.binary.cwd}, then restart the Oxc servers. ${error instanceof Error ? error.message : String(error)}`;
       this.outputChannel.error(this.binaryError);
     }

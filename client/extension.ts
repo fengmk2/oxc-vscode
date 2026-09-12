@@ -10,7 +10,7 @@ import ToolInterface from "./tools/ToolInterface";
 const outputChannelName = "Oxc";
 const tools: ToolInterface[] = [];
 
-export async function activate(context: ExtensionContext) {
+export async function activate(context: ExtensionContext): Promise<void> {
   const configService = new ConfigService();
 
   const outputChannelLint = window.createOutputChannel(outputChannelName + " (Lint)", {
@@ -74,7 +74,7 @@ export async function activate(context: ExtensionContext) {
     context.subscriptions.push(formatter);
   }
 
-  const restartTool = async (tool: ToolInterface, outputChannel: LogOutputChannel) => {
+  async function restartTool(tool: ToolInterface, outputChannel: LogOutputChannel): Promise<void> {
     try {
       await tool.restart();
     } catch (e) {
@@ -82,7 +82,7 @@ export async function activate(context: ExtensionContext) {
       Try to restart the editor manually.
       `);
     }
-  };
+  }
 
   configService.onConfigChange = async function onConfigChange(event) {
     await Promise.all(tools.map((tool) => tool.onConfigChange(event)));
@@ -112,16 +112,11 @@ export async function activate(context: ExtensionContext) {
   const initialDocument = window.activeTextEditor?.document.uri.toString();
   const binaryPaths = await Promise.all(tools.map((tool) => tool.getBinary()));
 
-  await Promise.all(
-    tools.map((tool): Promise<void> => {
-      const binaryPath = binaryPaths[tools.indexOf(tool)];
-      return tool.activate(binaryPath);
-    }),
-  );
+  await Promise.all(tools.map((tool, index) => tool.activate(binaryPaths[index])));
 
   // A window has one client per tool. Re-resolve on navigation, and restart
   // only when the executable, Vite+ command, or project directory changes.
-  const switchProject = async () => {
+  async function switchProject(): Promise<void> {
     await Promise.all(
       tools.map(async (tool) => {
         try {
@@ -134,14 +129,15 @@ export async function activate(context: ExtensionContext) {
         }
       }),
     );
-  };
+  }
   context.subscriptions.push(
     window.onDidChangeActiveTextEditor((editor) => {
       if (
         editor?.document.uri.scheme !== "file" ||
         !workspace.getWorkspaceFolder(editor.document.uri)
-      )
+      ) {
         return;
+      }
       void switchProject();
     }),
   );

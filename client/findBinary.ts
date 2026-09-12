@@ -40,18 +40,25 @@ export function replaceTargetFromMainToBin(resolvedPath: string, binaryName: str
   throw new Error(`Could not find package.json for "${binaryName}"`);
 }
 
+function binaryCandidates(folder: string, binaryName: string): string[] {
+  const basePath = path.join(folder, binaryName);
+  if (process.platform !== "win32") {
+    return [basePath];
+  }
+  // Prefer Windows shims over the extensionless POSIX vp shim.
+  if (binaryName === "vp") {
+    return [`${basePath}.cmd`, `${basePath}.exe`, basePath];
+  }
+  return [basePath, `${basePath}.exe`];
+}
+
 async function searchNodeModulesDefaultBinPath(
   binaryName: string,
   folders: string[],
 ): Promise<BinarySearchResult | undefined> {
-  const candidates = folders.flatMap((folder) => {
-    const basePath = path.join(folder, ".bin", binaryName);
-    return process.platform === "win32"
-      ? binaryName === "vp"
-        ? [`${basePath}.cmd`, `${basePath}.exe`, basePath]
-        : [basePath, `${basePath}.exe`]
-      : [basePath];
-  });
+  const candidates = folders.flatMap((folder) =>
+    binaryCandidates(path.join(folder, ".bin"), binaryName),
+  );
 
   const exists = await Promise.all(
     candidates.map(async (candidate) => {
@@ -261,19 +268,12 @@ export async function searchEnvPath(
     return undefined;
   }
 
-  // generate candidate paths by joining each PATH entry with the binary name
-  // on Windows, also consider the .exe extension
+  // Ignore empty PATH entries and preserve directory and executable priority.
   const candidates = envPath.split(path.delimiter).flatMap((folder) => {
-    // filter out empty entries which can occur if PATH starts or ends with a delimiter
     if (!folder) {
       return [];
     }
-    const basePath = path.join(folder, defaultBinaryName);
-    return process.platform === "win32"
-      ? defaultBinaryName === "vp"
-        ? [`${basePath}.cmd`, `${basePath}.exe`, basePath]
-        : [basePath, `${basePath}.exe`]
-      : [basePath];
+    return binaryCandidates(folder, defaultBinaryName);
   });
 
   const binary = await Promise.all(
@@ -391,12 +391,10 @@ async function resolveGlobalNodeModulesPaths(): Promise<string[]> {
 
 // only use this function with internal code, because it executes shell commands
 // which could be a security risk if the command or args are user-controlled
-const safeSpawnSync = async (
+async function safeSpawnSync(
   command: string,
   args: readonly string[] = [],
-): Promise<string | undefined> => {
-  let output: string | undefined;
-
+): Promise<string | undefined> {
   try {
     const result = spawnSync(command, args, {
       shell: true,
@@ -405,14 +403,10 @@ const safeSpawnSync = async (
     });
 
     if (result.error || result.status !== 0) {
-      output = undefined;
-    } else {
-      const trimmed = result.stdout.trim();
-      output = trimmed ? trimmed : undefined;
+      return undefined;
     }
+    return result.stdout.trim() || undefined;
   } catch {
-    output = undefined;
+    return undefined;
   }
-
-  return output;
-};
+}

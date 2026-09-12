@@ -38,18 +38,20 @@ function isRootWorkspace(dir: string, pkg: PackageJson | null): boolean {
  */
 export function detectVitePlusProject(
   start: string,
-  enabled = false,
+  forceVitePlus = false,
   workspaceFolder?: string,
 ): VitePlusProject | null {
   let dir = path.resolve(start);
   try {
-    if (statSync(dir).isFile()) dir = path.dirname(dir);
+    if (statSync(dir).isFile()) {
+      dir = path.dirname(dir);
+    }
   } catch {
     // The caller can also pass a directory that does not exist yet.
   }
 
   let pkg = readPackageJson(dir);
-  if (enabled) {
+  if (forceVitePlus) {
     // Explicit opt-in skips dependency detection, but still needs a stable cwd
     // when the active document moves between source directories.
     const fallbackRoot = workspaceFolder ? path.resolve(workspaceFolder) : dir;
@@ -65,21 +67,29 @@ export function detectVitePlusProject(
     }
   } else {
     while (!pkg?.dependencies?.["vite-plus"] && !pkg?.devDependencies?.["vite-plus"]) {
-      if (isRootWorkspace(dir, pkg) || dir === path.dirname(dir)) return null;
-      dir = path.dirname(dir);
+      const parent = path.dirname(dir);
+      if (isRootWorkspace(dir, pkg) || dir === parent) {
+        return null;
+      }
+      dir = parent;
       pkg = readPackageJson(dir);
     }
   }
 
   const root = dir;
+  const binNames = process.platform === "win32" ? ["vp.cmd", "vp.exe"] : ["vp"];
   while (true) {
-    const binNames = process.platform === "win32" ? ["vp.cmd", "vp.exe"] : ["vp"];
     for (const name of binNames) {
       const vpPath = path.join(dir, "node_modules", ".bin", name);
-      if (existsSync(vpPath)) return { root, vpPath };
+      if (existsSync(vpPath)) {
+        return { root, vpPath };
+      }
     }
-    if (isRootWorkspace(dir, pkg) || dir === path.dirname(dir)) return { root };
-    dir = path.dirname(dir);
+    const parent = path.dirname(dir);
+    if (isRootWorkspace(dir, pkg) || dir === parent) {
+      return { root };
+    }
+    dir = parent;
     pkg = readPackageJson(dir);
   }
 }
