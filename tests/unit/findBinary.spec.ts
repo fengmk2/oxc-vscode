@@ -15,6 +15,7 @@ import {
   searchSettingsBin,
 } from "../../client/findBinary";
 import { WORKSPACE_FOLDER } from "../test-helpers.js";
+import { mockProcessPlatform } from "../processMocks";
 
 const shellEnv: typeof import("../../client/getShellEnv") = require(
   path.join(__dirname, "../client/getShellEnv.js"),
@@ -22,20 +23,19 @@ const shellEnv: typeof import("../../client/getShellEnv") = require(
 
 suite("findBinary", () => {
   const binaryName = "oxlint";
+  const setPlatform = mockProcessPlatform();
 
   test("prefers a Windows vp.cmd shim over the POSIX shim for a configured path", async () => {
-    const originalPlatform = process.platform;
     const dir = mkdtempSync(path.join(tmpdir(), "test-vp-cmd-"));
     const vpPath = path.join(dir, "vp");
     writeFileSync(vpPath, "");
     writeFileSync(`${vpPath}.cmd`, "");
     try {
-      Object.defineProperty(process, "platform", { value: "win32" });
+      setPlatform("win32");
       const result = await searchSettingsBin("vp", vpPath);
       strictEqual(result?.path, `${vpPath}.cmd`);
       strictEqual(result?.loader, "native");
     } finally {
-      Object.defineProperty(process, "platform", { value: originalPlatform });
       rmSync(dir, { recursive: true, force: true });
     }
   });

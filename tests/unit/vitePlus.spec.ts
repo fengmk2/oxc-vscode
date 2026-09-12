@@ -6,6 +6,7 @@ import { commands, ConfigurationTarget, Uri, window, workspace } from "vscode";
 import { ConfigService } from "../../client/ConfigService";
 import { runExecutable } from "../../client/tools/lsp_helper";
 import { WORKSPACE_FOLDER, WORKSPACE_SECOND_FOLDER } from "../test-helpers";
+import { mockProcessEnv, mockProcessPlatform } from "../processMocks";
 
 // Mock the shared CommonJS exports used by the compiled test modules.
 const shellEnv: typeof import("../../client/getShellEnv") = require(
@@ -20,7 +21,8 @@ suite("Vite+ server selection", () => {
   const secondRoot =
     WORKSPACE_SECOND_FOLDER && path.join(WORKSPACE_SECOND_FOLDER.uri.fsPath, "vite-plus-tests");
   const conf = workspace.getConfiguration("oxc", WORKSPACE_FOLDER.uri);
-  const originalPath = process.env.PATH;
+  const setPlatform = mockProcessPlatform();
+  mockProcessEnv();
   let service: ConfigService;
 
   function file(relative: string, content = "", dir = root): string {
@@ -78,8 +80,6 @@ suite("Vite+ server selection", () => {
     service.dispose();
     findBinary.clearGlobalNodeModulesPathsCache();
     mock.restoreAll();
-    if (originalPath === undefined) delete process.env.PATH;
-    else process.env.PATH = originalPath;
     await commands.executeCommand("workbench.action.closeAllEditors");
     for (const folder of [WORKSPACE_FOLDER, WORKSPACE_SECOND_FOLDER]) {
       if (!folder) continue;
@@ -311,42 +311,32 @@ suite("Vite+ server selection", () => {
       declare();
       const shellBin = path.join(root, "shell-bin");
       const vpPath = file(`vp.${extension}`, "", shellBin);
-      const originalPlatform = process.platform;
-      const originalEnv = process.env;
-      try {
-        Object.defineProperty(process, "platform", { value: "win32" });
-        process.env = { ...originalEnv };
-        for (const key of Object.keys(process.env)) {
-          if (key.toUpperCase() === "PATH") delete process.env[key];
-        }
-        process.env.Path = shellBin;
-        // Use a fresh instance of the real provider to exercise its environment copy.
-        const { getShellEnv } = await import(
-          `../../client/getShellEnv.ts?windowsPath=${extension}`
-        );
-        mock.method(shellEnv, "getShellEnv", getShellEnv);
-
-        const binaries = await Promise.all([
-          service.getOxlintServerBinPath(),
-          service.getOxfmtServerBinPath(),
-        ]);
-        await Promise.all(
-          binaries.map(async (binary) => {
-            strictEqual(binary?.path, vpPath);
-            const executable = await runExecutable(binary!, true);
-            strictEqual(
-              executable.options?.env?.PATH,
-              `${path.dirname(process.execPath)}${path.delimiter}${shellBin}`,
-            );
-            strictEqual(executable.options?.env?.Path, undefined);
-          }),
-        );
-        strictEqual(process.env.Path, shellBin);
-        strictEqual(process.env.PATH, undefined);
-      } finally {
-        Object.defineProperty(process, "platform", { value: originalPlatform });
-        process.env = originalEnv;
+      setPlatform("win32");
+      for (const key of Object.keys(process.env)) {
+        if (key.toUpperCase() === "PATH") delete process.env[key];
       }
+      process.env.Path = shellBin;
+      // Use a fresh instance of the real provider to exercise its environment copy.
+      const { getShellEnv } = await import(`../../client/getShellEnv.ts?windowsPath=${extension}`);
+      mock.method(shellEnv, "getShellEnv", getShellEnv);
+
+      const binaries = await Promise.all([
+        service.getOxlintServerBinPath(),
+        service.getOxfmtServerBinPath(),
+      ]);
+      await Promise.all(
+        binaries.map(async (binary) => {
+          strictEqual(binary?.path, vpPath);
+          const executable = await runExecutable(binary!, true);
+          strictEqual(
+            executable.options?.env?.PATH,
+            `${path.dirname(process.execPath)}${path.delimiter}${shellBin}`,
+          );
+          strictEqual(executable.options?.env?.Path, undefined);
+        }),
+      );
+      strictEqual(process.env.Path, shellBin);
+      strictEqual(process.env.PATH, undefined);
     });
   }
 

@@ -8,14 +8,16 @@ import type { BinarySearchResult } from "../../client/findBinary";
 import Formatter from "../../client/tools/formatter";
 import Linter from "../../client/tools/linter";
 import { WORKSPACE_FOLDER } from "../test-helpers";
+import { mockProcessEnv } from "../processMocks";
 
 suite("navigation during extension activation", () => {
   const root = path.join(WORKSPACE_FOLDER.uri.fsPath, "startup-navigation");
-  const originalEnv = process.env;
+  mockProcessEnv();
   let context: ExtensionContext;
 
   setup(() => {
-    process.env = { ...originalEnv, SKIP_LINTER_TEST: "false", SKIP_FORMATTER_TEST: "false" };
+    process.env.SKIP_LINTER_TEST = "false";
+    process.env.SKIP_FORMATTER_TEST = "false";
     mkdirSync(root, { recursive: true });
     for (const name of ["a", "b"]) writeFileSync(path.join(root, `${name}.txt`), "");
     // The test host has already registered the extension's commands.
@@ -30,7 +32,6 @@ suite("navigation during extension activation", () => {
     await deactivate();
     for (const disposable of context.subscriptions) disposable.dispose();
     mock.restoreAll();
-    process.env = originalEnv;
     await commands.executeCommand("workbench.action.closeAllEditors");
     rmSync(root, { recursive: true, force: true });
   });

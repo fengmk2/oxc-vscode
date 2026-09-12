@@ -6,6 +6,7 @@ import { mock } from "node:test";
 import { runExecutable } from "../../client/tools/lsp_helper";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { mockProcessEnv, mockProcessPlatform } from "../processMocks";
 
 // Mock the shared CommonJS exports used by the compiled test modules.
 const shellEnv: typeof import("../../client/getShellEnv") = require(
@@ -14,11 +15,11 @@ const shellEnv: typeof import("../../client/getShellEnv") = require(
 
 suite("runExecutable", () => {
   const originalPlatform = process.platform;
-  const originalEnv = process.env;
+  const setPlatform = mockProcessPlatform();
+  mockProcessEnv();
   let tempDir: string;
 
   setup(() => {
-    process.env = { ...originalEnv };
     tempDir = mkdtempSync(path.join(tmpdir(), "vp-runtime-"));
     mock.method(shellEnv, "getShellEnv", async () => ({ PATH: process.env.PATH }));
   });
@@ -26,8 +27,6 @@ suite("runExecutable", () => {
   teardown(() => {
     mock.restoreAll();
     rmSync(tempDir, { recursive: true, force: true });
-    Object.defineProperty(process, "platform", { value: originalPlatform });
-    process.env = originalEnv;
   });
 
   for (const command of ["lint", "fmt"] as const) {
@@ -129,7 +128,7 @@ process.exit(child.status ?? 1);
   });
 
   test("quotes Windows vp.cmd paths and passes the subcommand through the shell", async () => {
-    Object.defineProperty(process, "platform", { value: "win32" });
+    setPlatform("win32");
     const result = await runExecutable({
       path: "C:\\My Project\\node_modules\\.bin\\vp.cmd",
       loader: "native",
@@ -190,7 +189,7 @@ process.exit(child.status ?? 1);
   });
 
   test("should use shell on Windows for binary executables", async () => {
-    Object.defineProperty(process, "platform", { value: "win32" });
+    setPlatform("win32");
 
     const result = await runExecutable({
       path: "C:\\Path With Spaces\\oxc-language-server",
@@ -201,7 +200,7 @@ process.exit(child.status ?? 1);
   });
 
   test("should prepend nodePath to PATH", async () => {
-    Object.defineProperty(process, "platform", { value: "linux" });
+    setPlatform("linux");
     process.env.PATH = "/usr/bin:/bin";
 
     const result = await runExecutable(
@@ -218,7 +217,7 @@ process.exit(child.status ?? 1);
   });
 
   test("should set path in quotes on Windows for binary executables", async () => {
-    Object.defineProperty(process, "platform", { value: "win32" });
+    setPlatform("win32");
 
     const result = await runExecutable({
       path: "C:\\Path With Spaces\\oxc-language-server",

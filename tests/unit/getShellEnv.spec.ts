@@ -1,7 +1,8 @@
 import { strictEqual } from "assert";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
+import { mockProcessEnv, mockProcessPlatform } from "../processMocks";
 
 type GetShellEnvModule = {
   getShellEnv: () => Promise<Record<string, string | undefined>>;
@@ -24,20 +25,19 @@ function createMockShellScript(dir: string, name: string, scriptBody: string): s
 
 suite("getShellEnv", () => {
   let tempDir: string;
-  const originalPlatform = process.platform;
-  const originalEnv = process.env;
+  const setPlatform = mockProcessPlatform();
+  mockProcessEnv();
 
   setup(() => {
     tempDir = mkdtempSync(path.join(tmpdir(), "get-shell-env-test-"));
   });
 
   teardown(() => {
-    Object.defineProperty(process, "platform", { value: originalPlatform });
-    process.env = originalEnv;
+    rmSync(tempDir, { recursive: true, force: true });
   });
 
   test("copies process.env on win32", async () => {
-    Object.defineProperty(process, "platform", { value: "win32" });
+    setPlatform("win32");
     process.env.GET_SHELL_ENV_TEST_KEY = "windows-fast-path";
     process.env.SHELL = path.join(tempDir, "does-not-matter-on-win32");
 
@@ -49,7 +49,7 @@ suite("getShellEnv", () => {
 
   for (const key of ["Path", "PATH", "pAtH"]) {
     test(`normalizes ${key} in the Windows environment copy`, async () => {
-      Object.defineProperty(process, "platform", { value: "win32" });
+      setPlatform("win32");
       process.env = { [key]: tempDir, KEEP_ME: "unchanged" };
       const { getShellEnv } = await loadFreshGetShellEnvModule();
       const env = await getShellEnv();

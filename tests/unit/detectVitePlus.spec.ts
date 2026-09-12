@@ -3,10 +3,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { detectVitePlusProject } from "../../client/detectVitePlus";
+import { mockProcessPlatform } from "../processMocks";
 
 suite("detectVitePlusProject", () => {
   let root: string;
-  const originalPlatform = process.platform;
+  const setPlatform = mockProcessPlatform();
 
   function file(relative: string, content = ""): string {
     const target = path.join(root, relative);
@@ -31,7 +32,6 @@ suite("detectVitePlusProject", () => {
   });
 
   teardown(() => {
-    Object.defineProperty(process, "platform", { value: originalPlatform });
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -163,7 +163,7 @@ suite("detectVitePlusProject", () => {
   });
 
   test("selects vp.cmd on Windows", () => {
-    Object.defineProperty(process, "platform", { value: "win32" });
+    setPlatform("win32");
     pkg();
     file("node_modules/.bin/vp");
     file("node_modules/.bin/vp.exe");
@@ -172,7 +172,7 @@ suite("detectVitePlusProject", () => {
   });
 
   test("selects a local vp.exe shim on Windows before a hoisted vp.cmd", () => {
-    Object.defineProperty(process, "platform", { value: "win32" });
+    setPlatform("win32");
     pkg("packages/app");
     shim();
     const vpPath = file("packages/app/node_modules/.bin/vp.exe");
