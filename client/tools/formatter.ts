@@ -267,7 +267,7 @@ export default class FormatterTool implements ToolInterface {
     })),
   ];
 
-  private disposeResources: (() => Promise<void>) | undefined;
+  private disposeResources: (() => void) | undefined;
 
   // Command and provider disposables (registered once at construction)
   private readonly restartCommand: { dispose: () => void };
@@ -409,12 +409,7 @@ export default class FormatterTool implements ToolInterface {
       },
     );
 
-    this.disposeResources = async () => {
-      try {
-        await this.client?.dispose();
-      } catch {
-        // do nothing, the client may already be stopped
-      }
+    this.disposeResources = () => {
       onNotificationDispose.dispose();
     };
 
@@ -431,13 +426,16 @@ export default class FormatterTool implements ToolInterface {
 
   private async stopClient(): Promise<void> {
     try {
-      await this.client?.stop();
-    } catch {
-      // do nothing, the client may already be stopped
+      await this.client?.dispose();
+    } catch (error) {
+      // A client whose startup failed can reject disposal. Still release our resources
+      // so a corrected executable can start without reloading the window.
+      this.outputChannel.warn("Failed to dispose the oxfmt client.", error);
+    } finally {
+      this.disposeResources?.();
+      this.disposeResources = undefined;
+      this.client = undefined;
     }
-    await this.disposeResources?.();
-    this.disposeResources = undefined;
-    this.client = undefined;
   }
 
   restart(onlyIfBinaryChanged = false): Promise<void> {

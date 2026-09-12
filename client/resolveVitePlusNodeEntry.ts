@@ -1,4 +1,4 @@
-import { closeSync, openSync, readFileSync, readSync } from "node:fs";
+import { closeSync, lstatSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import * as path from "node:path";
 
 const nodeShebangPattern = /^#!\s*(?:\S*\/node|\S*\/env\s+(?:-S\s+)?node)(?:\s|$)/;
@@ -32,13 +32,17 @@ export function resolveVitePlusNodeEntry(vpPath: string): string | undefined {
     // Do not execute the shim or expand shell variables to locate the entry.
     const shim = readFileSync(vpPath, "utf8");
     const target = isCmd
-      ? /"%(?:~dp0|dp0%)[\\/]([^"\r\n]+)"[ \t]+%\*/.exec(shim)
+      ? /"((?:%(?:~dp0|dp0%)[\\/]|[a-zA-Z]:[\\/]|\\\\)[^"\r\n]+)"[ \t]+%\*/.exec(shim)
       : /"\$basedir\/([^"\r\n]+)"[ \t]+"\$@"/.exec(shim);
-    const binDir = path.dirname(vpPath);
+    // pnpm shell shims can follow symlinks before computing their base directory.
+    const shimPath = !isCmd && lstatSync(vpPath).isSymbolicLink() ? realpathSync(vpPath) : vpPath;
+    const binDir = path.dirname(shimPath);
     let nodeEntry: string | undefined;
     if (target) {
-      const relativeTarget = isCmd ? target[1].replaceAll("\\", path.sep) : target[1];
-      nodeEntry = path.resolve(binDir, relativeTarget);
+      const entryPath = isCmd
+        ? target[1].replace(/^%(?:~dp0|dp0%)[\\/]/, "").replaceAll("\\", path.sep)
+        : target[1];
+      nodeEntry = path.resolve(binDir, entryPath);
     } else if (path.basename(binDir) === ".bin") {
       nodeEntry = path.resolve(binDir, "..", "vite-plus", "bin", "vp");
     } else if (isCmd) {

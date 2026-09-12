@@ -22,6 +22,12 @@ suite("navigation during extension activation", () => {
     for (const name of ["a", "b"]) writeFileSync(path.join(root, `${name}.txt`), "");
     // The test host has already registered the extension's commands.
     mock.method(commands, "registerCommand", () => ({ dispose() {} }));
+    // Log channels with the same name share a logger in VS Code. Keep disposal
+    // of these test instances from closing the activated extension's channels.
+    const createOutputChannel = window.createOutputChannel;
+    mock.method(window, "createOutputChannel", (name: string, options: { log: true }) =>
+      createOutputChannel(`Activation test ${name}`, options),
+    );
     context = {
       extension: { packageJSON: { version: "test" } },
       subscriptions: [],

@@ -1,6 +1,6 @@
 import { deepStrictEqual, strictEqual } from "assert";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { mock } from "node:test";
 import { runExecutable } from "../../client/tools/lsp_helper";
@@ -64,12 +64,15 @@ suite("runExecutable", () => {
     "cmd",
     "global-cmd",
     "global-pnpm",
+    "global-pnpm-symlink",
     "global-pnpm-cmd",
   ] as const) {
     for (const command of ["lint", "fmt"] as const) {
       test(`runs ${shimType} vp ${command} with bundled Node and no system Node`, async function () {
-        if (shimType === "npm" && originalPlatform === "win32") this.skip();
-        const isGlobalPnpm = shimType === "global-pnpm" || shimType === "global-pnpm-cmd";
+        if ((shimType === "npm" || shimType.endsWith("symlink")) && originalPlatform === "win32") {
+          this.skip();
+        }
+        const isGlobalPnpm = shimType.startsWith("global-pnpm");
         const isCmd = shimType.endsWith("cmd");
         const modulesDir = isGlobalPnpm
           ? path.join(tempDir, "custom global store", "5", "node_modules")
@@ -81,7 +84,7 @@ suite("runExecutable", () => {
         } else if (shimType === "global-cmd") {
           binDir = tempDir;
         }
-        const shim = path.join(binDir, isCmd ? "vp.cmd" : "vp");
+        let shim = path.join(binDir, isCmd ? "vp.cmd" : "vp");
         mkdirSync(path.dirname(nodeEntry), { recursive: true });
         mkdirSync(path.dirname(shim), { recursive: true });
         writeFileSync(
@@ -115,6 +118,12 @@ process.exit(child.status ?? 1);
           const adjacentEntry = path.join(binDir, "node_modules", "vite-plus", "bin", "vp");
           mkdirSync(path.dirname(adjacentEntry), { recursive: true });
           writeFileSync(adjacentEntry, "#!/usr/bin/env node\nthrow new Error('wrong entry');\n");
+          if (shimType === "global-pnpm-symlink") {
+            const alias = path.join(tempDir, "linked bin", "nested", "vp");
+            mkdirSync(path.dirname(alias), { recursive: true });
+            symlinkSync(shim, alias);
+            shim = alias;
+          }
         } else if (shimType === "npm") {
           symlinkSync(nodeEntry, shim);
         } else {
@@ -130,7 +139,10 @@ process.exit(child.status ?? 1);
           true,
         );
         strictEqual(result.command, process.execPath);
-        deepStrictEqual(result.args, [shimType === "npm" ? shim : nodeEntry, command, "--lsp"]);
+        let expectedEntry = nodeEntry;
+        if (shimType === "npm") expectedEntry = shim;
+        if (shimType === "global-pnpm-symlink") expectedEntry = realpathSync(nodeEntry);
+        deepStrictEqual(result.args, [expectedEntry, command, "--lsp"]);
         strictEqual(result.options?.env?.ELECTRON_RUN_AS_NODE, "1");
         // vp must reuse process.execPath for its subprocess, without PATH shims.
         const child = spawnSync(result.command, result.args, {

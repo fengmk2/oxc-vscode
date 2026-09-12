@@ -150,7 +150,7 @@ export default class LinterTool implements ToolInterface {
   private binaryError: string | undefined;
   private restartQueue: Promise<void> = Promise.resolve();
 
-  private disposeResources: (() => Promise<void>) | undefined;
+  private disposeResources: (() => void) | undefined;
 
   // Command disposables (registered once at construction)
   private readonly restartCommand: { dispose: () => void };
@@ -371,6 +371,12 @@ export default class LinterTool implements ToolInterface {
     });
 
     let activatorDispatcher: { dispose: () => void } | undefined;
+    this.disposeResources = () => {
+      onNotificationDispose.dispose();
+      onDeleteFilesDispose.dispose();
+      activatorDispatcher?.dispose();
+    };
+
     if (this.allowedToStartServer) {
       if (this.configService.vsCodeConfig.enableOxlint) {
         await this.startClient();
@@ -378,17 +384,6 @@ export default class LinterTool implements ToolInterface {
     } else {
       activatorDispatcher = this.generateActivatorByConfig(this.configService.vsCodeConfig);
     }
-
-    this.disposeResources = async () => {
-      try {
-        await this.client?.dispose();
-      } catch {
-        // do nothing, the client may already be stopped
-      }
-      onNotificationDispose.dispose();
-      onDeleteFilesDispose.dispose();
-      activatorDispatcher?.dispose();
-    };
 
     this.updateStatusBar(this.configService.vsCodeConfig.enableOxlint);
   }
@@ -400,13 +395,16 @@ export default class LinterTool implements ToolInterface {
 
   private async stopClient(): Promise<void> {
     try {
-      await this.client?.stop();
-    } catch {
-      // do nothing, the client may already be stopped
+      await this.client?.dispose();
+    } catch (error) {
+      // A client whose startup failed can reject disposal. Still release our resources
+      // so a corrected executable can start without reloading the window.
+      this.outputChannel.warn("Failed to dispose the oxlint client.", error);
+    } finally {
+      this.disposeResources?.();
+      this.disposeResources = undefined;
+      this.client = undefined;
     }
-    await this.disposeResources?.();
-    this.disposeResources = undefined;
-    this.client = undefined;
   }
 
   dispose(): void {

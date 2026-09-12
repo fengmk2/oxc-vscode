@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "assert";
+import { deepStrictEqual, notStrictEqual, ok, rejects, strictEqual } from "assert";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { mock } from "node:test";
@@ -169,6 +169,19 @@ for (const [Tool, command, getter] of [
         3,
         "the restart command must allow an unchanged binary",
       );
+    });
+
+    test("replaces a client after its server fails to launch", async () => {
+      mock.getter(service.vsCodeConfig, "useExecPath", () => false);
+      mock.getter(service.vsCodeConfig, "nodePath", () => path.join(root, "missing-node"));
+      await tool.restart();
+      const failedClient = (tool as unknown as { client: LanguageClient }).client;
+      await rejects(failedClient.start());
+
+      await tool.restart();
+      const replacement = (tool as unknown as { client: LanguageClient }).client;
+      notStrictEqual(replacement, failedClient);
+      ok(replacement, "a failed startup must not prevent the next activation");
     });
 
     test("navigation reuses global locations and an explicit restart refreshes them", async () => {
