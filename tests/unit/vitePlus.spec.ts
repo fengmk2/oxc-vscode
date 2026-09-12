@@ -306,6 +306,50 @@ suite("Vite+ server selection", () => {
     );
   });
 
+  for (const extension of ["cmd", "exe"]) {
+    test(`discovers global vp.${extension} from a Windows Path environment key`, async () => {
+      declare();
+      const shellBin = path.join(root, "shell-bin");
+      const vpPath = file(`vp.${extension}`, "", shellBin);
+      const originalPlatform = process.platform;
+      const originalEnv = process.env;
+      try {
+        Object.defineProperty(process, "platform", { value: "win32" });
+        process.env = { ...originalEnv };
+        for (const key of Object.keys(process.env)) {
+          if (key.toUpperCase() === "PATH") delete process.env[key];
+        }
+        process.env.Path = shellBin;
+        // Use a fresh instance of the real provider to exercise its environment copy.
+        const { getShellEnv } = await import(
+          `../../client/getShellEnv.ts?windowsPath=${extension}`
+        );
+        mock.method(shellEnv, "getShellEnv", getShellEnv);
+
+        const binaries = await Promise.all([
+          service.getOxlintServerBinPath(),
+          service.getOxfmtServerBinPath(),
+        ]);
+        await Promise.all(
+          binaries.map(async (binary) => {
+            strictEqual(binary?.path, vpPath);
+            const executable = await runExecutable(binary!, true);
+            strictEqual(
+              executable.options?.env?.PATH,
+              `${path.dirname(process.execPath)}${path.delimiter}${shellBin}`,
+            );
+            strictEqual(executable.options?.env?.Path, undefined);
+          }),
+        );
+        strictEqual(process.env.Path, shellBin);
+        strictEqual(process.env.PATH, undefined);
+      } finally {
+        Object.defineProperty(process, "platform", { value: originalPlatform });
+        process.env = originalEnv;
+      }
+    });
+  }
+
   test("missing local and global installs give an install hint, even if plain tools exist", async () => {
     declare();
     process.env.PATH = root;
