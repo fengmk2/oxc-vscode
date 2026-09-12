@@ -58,15 +58,30 @@ suite("runExecutable", () => {
     });
   }
 
-  for (const shimType of ["npm", "pnpm", "cmd", "global-cmd"] as const) {
+  for (const shimType of [
+    "npm",
+    "pnpm",
+    "cmd",
+    "global-cmd",
+    "global-pnpm",
+    "global-pnpm-cmd",
+  ] as const) {
     for (const command of ["lint", "fmt"] as const) {
       test(`runs ${shimType} vp ${command} with bundled Node and no system Node`, async function () {
         if (shimType === "npm" && originalPlatform === "win32") this.skip();
-        const nodeEntry = path.join(tempDir, "node_modules", "vite-plus", "bin", "vp");
-        const shim =
-          shimType === "global-cmd"
-            ? path.join(tempDir, "vp.cmd")
-            : path.join(tempDir, "node_modules", ".bin", shimType === "cmd" ? "vp.cmd" : "vp");
+        const isGlobalPnpm = shimType === "global-pnpm" || shimType === "global-pnpm-cmd";
+        const isCmd = shimType.endsWith("cmd");
+        const modulesDir = isGlobalPnpm
+          ? path.join(tempDir, "custom global store", "5", "node_modules")
+          : path.join(tempDir, "node_modules");
+        const nodeEntry = path.join(modulesDir, "vite-plus", "bin", "vp");
+        let binDir = path.join(tempDir, "node_modules", ".bin");
+        if (isGlobalPnpm) {
+          binDir = path.join(tempDir, "global bin");
+        } else if (shimType === "global-cmd") {
+          binDir = tempDir;
+        }
+        const shim = path.join(binDir, isCmd ? "vp.cmd" : "vp");
         mkdirSync(path.dirname(nodeEntry), { recursive: true });
         mkdirSync(path.dirname(shim), { recursive: true });
         writeFileSync(
@@ -88,12 +103,26 @@ process.stderr.write(child.stderr);
 process.exit(child.status ?? 1);
 `,
         );
-        if (shimType === "npm") symlinkSync(nodeEntry, shim);
-        else
+        if (isGlobalPnpm) {
+          const relativeEntry = path.relative(binDir, nodeEntry);
+          // pnpm shims can contain long NODE_PATH setup before the launch command.
+          const padding = " ".repeat(512);
+          const script = isCmd
+            ? `@SETLOCAL\r\n@REM ${padding}\r\nnode "%~dp0\\${relativeEntry.replaceAll(path.sep, "\\")}" %*\r\n`
+            : `#!/bin/sh\n# ${padding}\nexec node "$basedir/${relativeEntry.replaceAll(path.sep, "/")}" "$@"\n`;
+          writeFileSync(shim, script);
+          // The recorded target must win over an unrelated adjacent installation.
+          const adjacentEntry = path.join(binDir, "node_modules", "vite-plus", "bin", "vp");
+          mkdirSync(path.dirname(adjacentEntry), { recursive: true });
+          writeFileSync(adjacentEntry, "#!/usr/bin/env node\nthrow new Error('wrong entry');\n");
+        } else if (shimType === "npm") {
+          symlinkSync(nodeEntry, shim);
+        } else {
           writeFileSync(
             shim,
             shimType === "pnpm" ? '#!/bin/sh\nexec node "$@"\n' : "@echo off\r\nnode %*\r\n",
           );
+        }
         process.env.PATH = path.join(tempDir, "no-system-node");
 
         const result = await runExecutable(
@@ -114,6 +143,19 @@ process.exit(child.status ?? 1);
       });
     }
   }
+
+  test("keeps a global shim when its recorded target is not a Node entry", async () => {
+    const shim = path.join(tempDir, "vp.cmd");
+    writeFileSync(shim, '@echo off\r\n"%~dp0\\native-vp" %*\r\n');
+    writeFileSync(path.join(tempDir, "native-vp"), Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+    const adjacentEntry = path.join(tempDir, "node_modules", "vite-plus", "bin", "vp");
+    mkdirSync(path.dirname(adjacentEntry), { recursive: true });
+    writeFileSync(adjacentEntry, "#!/usr/bin/env node\n");
+
+    const result = await runExecutable({ path: shim, loader: "native", vitePlus: "lint" }, true);
+    strictEqual(result.command, process.platform === "win32" ? `"${shim}"` : shim);
+    deepStrictEqual(result.args, ["lint", "--lsp"]);
+  });
 
   test("keeps a standalone native vp executable with useExecPath", async () => {
     const vpPath = path.join(tempDir, "node_modules", ".bin", "vp");

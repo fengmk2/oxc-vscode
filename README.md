@@ -45,7 +45,7 @@ You can also set `oxc.path.vp` to an absolute path or a path relative to the wor
 
 On Windows, use `./node_modules/.bin/vp.cmd` for npm or pnpm, or `./node_modules/.bin/vp.exe` for Bun.
 
-With `oxc.useExecPath`, the extension runs npm and pnpm project entries with VS Code's bundled Node. You can also set `oxc.path.vp` to `./node_modules/vite-plus/bin/vp` to select the JavaScript entry directly. Running without a system Node installation requires `vite-plus` `0.3.2` or later. Earlier releases still require `node` on `PATH` for their subprocesses.
+With `oxc.useExecPath`, the extension runs npm and pnpm entries with VS Code's bundled Node. This includes global pnpm installations. You can also set `oxc.path.vp` to `./node_modules/vite-plus/bin/vp` to select the JavaScript entry directly. Running without a system Node installation requires `vite-plus` `0.3.2` or later. Earlier releases still require `node` on `PATH` for their subprocesses.
 
 The source settings and `oxc.path.vp` can differ between workspace folders. Explicit `oxc.path.oxlint` and `oxc.path.oxfmt` settings take priority over source selection for their respective tools. Changing a source setting restarts only its tool.
 
