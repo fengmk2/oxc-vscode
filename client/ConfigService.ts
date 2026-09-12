@@ -5,6 +5,7 @@ import { getShellEnv } from "./getShellEnv";
 import { DiagnosticPullMode } from "vscode-languageclient";
 import {
   BinarySearchResult,
+  clearGlobalNodeModulesPathsCache,
   searchGlobalNodeModulesBin,
   searchEnvPath,
   searchProjectNodeModulesBin,
@@ -110,6 +111,11 @@ export class ConfigService implements IDisposable {
     return this.searchBinaryPath(this.vsCodeConfig.binPathOxfmt, "oxfmt");
   }
 
+  public clearBinarySearchCaches(): void {
+    clearGlobalNodeModulesPathsCache();
+    this.vitePlusSearches.clear();
+  }
+
   public shouldRequestDiagnostics(
     textDocumentUri: Uri,
     diagnosticPullMode: DiagnosticPullMode,
@@ -176,7 +182,7 @@ export class ConfigService implements IDisposable {
     try {
       return await search;
     } finally {
-      this.vitePlusSearches.delete(key);
+      if (this.vitePlusSearches.get(key) === search) this.vitePlusSearches.delete(key);
     }
   }
 

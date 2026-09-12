@@ -1,10 +1,12 @@
-import { strictEqual, throws } from "assert";
+import { deepStrictEqual, strictEqual, throws } from "assert";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
+import { mock } from "node:test";
 import { Uri, workspace } from "vscode";
 import {
   clearWorkspacePackageJsonNodeModulesCache,
+  clearGlobalNodeModulesPathsCache,
   replaceTargetFromMainToBin,
   searchGlobalNodeModulesBin,
   searchEnvPath,
@@ -13,6 +15,10 @@ import {
   searchSettingsBin,
 } from "../../client/findBinary";
 import { WORKSPACE_FOLDER } from "../test-helpers.js";
+
+const shellEnv: typeof import("../../client/getShellEnv") = require(
+  path.join(__dirname, "../client/getShellEnv.js"),
+);
 
 suite("findBinary", () => {
   const binaryName = "oxlint";
@@ -215,6 +221,77 @@ suite("findBinary", () => {
   });
 
   suite("searchGlobalNodeModulesBin", () => {
+    let globalModules: string;
+
+    setup(() => {
+      clearGlobalNodeModulesPathsCache();
+      globalModules = mkdtempSync(path.join(tmpdir(), "test-global-modules-"));
+    });
+
+    teardown(() => {
+      mock.restoreAll();
+      clearGlobalNodeModulesPathsCache();
+      rmSync(globalModules, { recursive: true, force: true });
+    });
+
+    test("shares package-manager probes across concurrent searches and repeated navigation", async () => {
+      const names = ["oxlint", "oxfmt", "vp"];
+      const paths = names.map((name) =>
+        path.join(
+          globalModules,
+          ".bin",
+          name === "vp" && process.platform === "win32" ? "vp.cmd" : name,
+        ),
+      );
+      mkdirSync(path.join(globalModules, ".bin"));
+      for (const binPath of paths) writeFileSync(binPath, "");
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      mock.method(shellEnv, "getShellEnv", async () => {
+        await gate;
+        return {};
+      });
+      const probes = mock.method(require("node:child_process"), "spawnSync", () => ({
+        status: 0,
+        stdout: globalModules,
+      }));
+      const pending = Promise.all(names.map((name) => searchGlobalNodeModulesBin(name)));
+      release();
+      deepStrictEqual(
+        (await pending).map((binary) => binary?.path),
+        paths,
+      );
+      strictEqual(probes.mock.callCount(), 2, "npm and pnpm should each run once");
+      for (let navigation = 0; navigation < 3; navigation++) {
+        // oxlint-disable-next-line no-await-in-loop -- simulate successive file switches
+        const binaries = await Promise.all(names.map((name) => searchGlobalNodeModulesBin(name)));
+        deepStrictEqual(
+          binaries.map((binary) => binary?.path),
+          paths,
+        );
+      }
+      strictEqual(probes.mock.callCount(), 2, "file switches must not repeat the probes");
+    });
+
+    test("finds newly installed binaries without repeating package-manager probes", async () => {
+      mock.method(shellEnv, "getShellEnv", async () => ({}));
+      const probes = mock.method(require("node:child_process"), "spawnSync", () => ({
+        status: 0,
+        stdout: globalModules,
+      }));
+      const name = "new-global-bin-test";
+      strictEqual(await searchGlobalNodeModulesBin(name), undefined);
+      const binPath = path.join(globalModules, ".bin", name);
+      mkdirSync(path.dirname(binPath));
+      writeFileSync(binPath, "");
+      strictEqual((await searchGlobalNodeModulesBin(name))?.path, binPath);
+      rmSync(binPath);
+      strictEqual(await searchGlobalNodeModulesBin(name), undefined);
+      strictEqual(probes.mock.callCount(), 2);
+    });
+
     test("should return undefined when binary is not found in global node_modules", async () => {
       const result = await searchGlobalNodeModulesBin("non-existent-binary-package-name-12345");
       strictEqual(result, undefined);

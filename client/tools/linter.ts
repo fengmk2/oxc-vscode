@@ -432,6 +432,7 @@ export default class LinterTool implements ToolInterface {
 
   restart(onlyIfBinaryChanged = false): Promise<void> {
     const restart = this.restartQueue.then(async () => {
+      if (!onlyIfBinaryChanged) this.configService.clearBinarySearchCaches();
       const previousError = this.binaryError;
       const newBinary = await this.getBinary();
       if (

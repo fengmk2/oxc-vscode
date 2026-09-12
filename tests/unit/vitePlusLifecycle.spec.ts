@@ -4,7 +4,11 @@ import * as path from "node:path";
 import { mock } from "node:test";
 import { window, workspace } from "vscode";
 import { ConfigService } from "../../client/ConfigService";
-import type { BinarySearchResult } from "../../client/findBinary";
+import {
+  BinarySearchResult,
+  clearGlobalNodeModulesPathsCache,
+  searchGlobalNodeModulesBin,
+} from "../../client/findBinary";
 import StatusBarItemHandler from "../../client/StatusBarItemHandler";
 import Formatter from "../../client/tools/formatter";
 import Linter from "../../client/tools/linter";
@@ -45,6 +49,7 @@ for (const [Tool, command, getter] of [
       output.dispose();
       status.dispose();
       mock.restoreAll();
+      clearGlobalNodeModulesPathsCache();
       await workspace.getConfiguration("oxc").update("enable", undefined);
       rmSync(root, { recursive: true, force: true });
     });
@@ -68,6 +73,41 @@ for (const [Tool, command, getter] of [
         3,
         "the restart command must allow an unchanged binary",
       );
+    });
+
+    test("navigation reuses global locations and an explicit restart refreshes them", async () => {
+      const name = command === "lint" ? "oxlint" : "oxfmt";
+      const firstModules = path.join(root, "first", "node_modules");
+      const secondModules = path.join(root, "second", "node_modules");
+      for (const dir of [firstModules, secondModules]) {
+        mkdirSync(path.join(dir, ".bin"), { recursive: true });
+        writeFileSync(path.join(dir, ".bin", name), "");
+      }
+      let globalModules = firstModules;
+      const probes = mock.method(require("node:child_process"), "spawnSync", () => ({
+        status: 0,
+        stdout: globalModules,
+      }));
+      mock.method(service, getter, () => searchGlobalNodeModulesBin(name));
+      const activation = mock.method(tool, "activate", tool.activate.bind(tool));
+      await tool.restart();
+      strictEqual(
+        activation.mock.calls[0].arguments[0]?.path,
+        path.join(firstModules, ".bin", name),
+      );
+      strictEqual(probes.mock.callCount(), 2);
+
+      globalModules = secondModules;
+      await tool.restart(true);
+      strictEqual(activation.mock.callCount(), 1);
+      strictEqual(probes.mock.callCount(), 2, "navigation must reuse the known locations");
+
+      await tool.restart();
+      strictEqual(
+        activation.mock.calls[1].arguments[0]?.path,
+        path.join(secondModules, ".bin", name),
+      );
+      strictEqual(probes.mock.callCount(), 4, "explicit restarts must query the locations again");
     });
 
     test("waits for an ongoing restart before processing another restart or shutdown", async () => {

@@ -365,8 +365,21 @@ export async function searchSettingsBin(
   return undefined;
 }
 
+let cachedGlobalNodeModulesPaths: Promise<string[]> | undefined;
+
+/** Refresh package-manager locations on an explicit server restart. */
+export function clearGlobalNodeModulesPathsCache(): void {
+  cachedGlobalNodeModulesPaths = undefined;
+}
+
+function globalNodeModulesPaths(): Promise<string[]> {
+  // Lint and format share the pending lookup and its result across navigation.
+  // Only locations are cached; binary searches still check the filesystem.
+  return (cachedGlobalNodeModulesPaths ??= resolveGlobalNodeModulesPaths());
+}
+
 // copied from: https://github.com/biomejs/biome-vscode/blob/ae9b6df2254d0ff8ee9d626554251600eb2ca118/src/locator.ts#L28-L49
-async function globalNodeModulesPaths(): Promise<string[]> {
+async function resolveGlobalNodeModulesPaths(): Promise<string[]> {
   const npmGlobalNodeModulesPath = await safeSpawnSync("npm", ["root", "-g"]);
   const pnpmGlobalNodeModulesPath = await safeSpawnSync("pnpm", ["root", "-g"]);
   const bunGlobalNodeModulesPath = path.resolve(homedir(), ".bun/install/global/node_modules");

@@ -67,6 +67,7 @@ suite("Vite+ server selection", () => {
   }
 
   setup(async () => {
+    findBinary.clearGlobalNodeModulesPathsCache();
     mock.method(shellEnv, "getShellEnv", async () => ({ PATH: process.env.PATH }));
     file("pnpm-workspace.yaml");
     await open();
@@ -75,6 +76,7 @@ suite("Vite+ server selection", () => {
 
   teardown(async () => {
     service.dispose();
+    findBinary.clearGlobalNodeModulesPathsCache();
     mock.restoreAll();
     if (originalPath === undefined) delete process.env.PATH;
     else process.env.PATH = originalPath;
@@ -400,6 +402,46 @@ suite("Vite+ server selection", () => {
     await open();
     deepStrictEqual(await service.getOxlintServerBinPath(), binaries.oxlint);
     strictEqual((await service.getOxfmtServerBinPath())?.path, firstPath);
+  });
+
+  test("a refresh replaces pending discovery without the old search clearing the new one", async () => {
+    const vpPath = file("bin/vp.js");
+    await conf.update("path.vp", vpPath, ConfigurationTarget.WorkspaceFolder);
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const secondGate = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    const searchSettingsBin = findBinary.searchSettingsBin;
+    let lookups = 0;
+    mock.method(
+      findBinary,
+      "searchSettingsBin",
+      async (name: string, configuredPath: string, cwd?: string) => {
+        await (++lookups === 1 ? firstGate : secondGate);
+        return searchSettingsBin(name, configuredPath, cwd);
+      },
+    );
+    const first = service.getOxlintServerBinPath();
+    service.clearBinarySearchCaches();
+    const second = service.getOxlintServerBinPath();
+    try {
+      strictEqual(lookups, 2, "refresh must start a new search");
+      releaseFirst();
+      await first;
+      const third = service.getOxfmtServerBinPath();
+      strictEqual(lookups, 2, "lint and format must still share the refreshed search");
+      releaseSecond();
+      strictEqual((await second)?.path, vpPath);
+      strictEqual((await third)?.path, vpPath);
+    } finally {
+      releaseFirst();
+      releaseSecond();
+      await Promise.all([first, second]);
+    }
   });
 
   for (const change of ["none", "folder", "setting", "source"] as const) {
