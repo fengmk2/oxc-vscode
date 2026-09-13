@@ -34,22 +34,18 @@ export function resolveVitePlusNodeEntry(vpPath: string): string | undefined {
     const target = isCmd
       ? /"((?:%(?:~dp0|dp0%)[\\/]|[a-zA-Z]:[\\/]|\\\\)[^"\r\n]+)"[ \t]+%\*/.exec(shim)
       : /"\$basedir\/([^"\r\n]+)"[ \t]+"\$@"/.exec(shim);
-    // pnpm shell shims can follow symlinks before computing their base directory.
-    const shimPath = !isCmd && lstatSync(vpPath).isSymbolicLink() ? realpathSync(vpPath) : vpPath;
-    const binDir = path.dirname(shimPath);
-    let nodeEntry: string | undefined;
-    if (target) {
-      const entryPath = isCmd
-        ? target[1].replace(/^%(?:~dp0|dp0%)[\\/]/, "").replaceAll("\\", path.sep)
-        : target[1];
-      nodeEntry = path.resolve(binDir, entryPath);
-    } else if (path.basename(binDir) === ".bin") {
-      nodeEntry = path.resolve(binDir, "..", "vite-plus", "bin", "vp");
-    } else if (isCmd) {
-      nodeEntry = path.join(binDir, "node_modules", "vite-plus", "bin", "vp");
+    if (!target) {
+      return undefined;
     }
 
-    if (nodeEntry && nodeShebangPattern.test(readShebang(nodeEntry))) {
+    // pnpm shell shims can follow symlinks before computing their base directory.
+    const shimPath = !isCmd && lstatSync(vpPath).isSymbolicLink() ? realpathSync(vpPath) : vpPath;
+    const entryPath = isCmd
+      ? target[1].replace(/^%(?:~dp0|dp0%)[\\/]/, "").replaceAll("\\", path.sep)
+      : target[1];
+    const nodeEntry = path.resolve(path.dirname(shimPath), entryPath);
+
+    if (nodeShebangPattern.test(readShebang(nodeEntry))) {
       return nodeEntry;
     }
   } catch {
