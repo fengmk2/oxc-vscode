@@ -245,11 +245,11 @@ export default class LinterTool implements ToolInterface {
       return;
     }
 
+    const requiresConfig = !binary.vitePlus && this.configService.vsCodeConfig.requireConfig;
     this.allowedToStartServer =
-      !binary.vitePlus && this.configService.vsCodeConfig.requireConfig
-        ? (await workspace.findFiles(oxlintConfigDefaultFilePattern, "**/node_modules/**", 1))
-            .length > 0
-        : true;
+      !requiresConfig ||
+      (await workspace.findFiles(oxlintConfigDefaultFilePattern, "**/node_modules/**", 1)).length >
+        0;
 
     const run: Executable = await runExecutable(
       binary,
